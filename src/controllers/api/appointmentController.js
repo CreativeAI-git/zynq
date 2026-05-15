@@ -12,7 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { NOTIFICATION_MESSAGES, sendNotification } from '../../services/notifications.service.js';
 import { getLatestFaceScanReportIDByUserID } from '../../utils/misc.util.js';
 import { sendEmail } from '../../services/send_email.js';
-import { appointmentBookedTemplate, appointmentBookedTemplateSv, appointmentBookingConfirmationTemplate, appointmentBookingConfirmationTemplateSwedish, appointmentReceiptTemplate, appointmentReceiptTemplateSwedish } from '../../utils/templates.js';
+import { appointmentBookedTemplate, appointmentBookedTemplateSv, appointmentBookingConfirmationTemplate, appointmentBookingConfirmationTemplateSwedish, appointmentReceiptTemplate, appointmentReceiptTemplateSwedish, appointmentCancelledDoctorTemplate, appointmentCancelledDoctorTemplateSv, appointmentCancelledUserTemplate, appointmentCancelledUserTemplateSv } from '../../utils/templates.js';
 import { getAdminCommissionRatesModel } from '../../models/admin.js';
 import { createPayLaterSetupIntent, createPayLaterSetupSession, createPaymentSessionForAppointment, createPaymentSessionForAppointmentPAYLATERKLARNA, getOrCreateStripeCustomerId, handleCheckoutSessionCompleted, handlePaymentIntentFailed, handlePaymentIntentSucceeded, handleSetupIntentSucceeded, updateAuthorizationSetupIntentIdOfAppointment, verifyStripeWebhook } from '../../models/payment.js';
 import { booleanValidation } from '../../utils/joi.util.js';
@@ -633,6 +633,56 @@ export const cancelAppointment = async (req, res) => {
             receiver_id: appointment.doctor_id,
             receiver_type: "DOCTOR"
         })
+
+        try {
+            const [doctor] = await getDocterByDocterId(appointment.doctor_id);
+            const fullAppointmentDetails = await getAppointmentDetails(user_id, appointment_id);
+
+            const clinicName = fullAppointmentDetails?.clinic_name || "";
+            const appointmentDateTime = appointment.start_time;
+
+            const selectedAppointmentCancelledDoctorTemplate = language === "sv"
+                ? appointmentCancelledDoctorTemplateSv
+                : appointmentCancelledDoctorTemplate;
+
+            const selectedAppointmentCancelledUserTemplate = language === "sv"
+                ? appointmentCancelledUserTemplateSv
+                : appointmentCancelledUserTemplate;
+
+            if (doctor?.email) {
+                await sendEmail({
+                    to: doctor.email,
+                    subject: selectedAppointmentCancelledDoctorTemplate.subject({
+                        user_name: req.user.full_name,
+                        appointment_date: appointmentDateTime,
+                    }),
+                    html: selectedAppointmentCancelledDoctorTemplate.body({
+                        user_name: req.user.full_name,
+                        doctor_name: doctor.name,
+                        appointment_date: appointmentDateTime,
+                        clinic_name: clinicName,
+                    }),
+                });
+            }
+
+            if (req.user?.email) {
+                await sendEmail({
+                    to: req.user.email,
+                    subject: selectedAppointmentCancelledUserTemplate.subject({
+                        doctor_name: doctor?.name || "",
+                        appointment_date: appointmentDateTime,
+                    }),
+                    html: selectedAppointmentCancelledUserTemplate.body({
+                        user_name: req.user.full_name,
+                        doctor_name: doctor?.name || "",
+                        appointment_date: appointmentDateTime,
+                        clinic_name: clinicName,
+                    }),
+                });
+            }
+        } catch (emailErr) {
+            console.error("Error sending cancellation email:", emailErr);
+        }
     } catch (err) {
         console.error(err);
         return handleError(res, 500, 'en', 'INTERNAL_SERVER_ERROR');
