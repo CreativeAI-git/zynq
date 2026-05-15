@@ -217,7 +217,7 @@
   "CHAT_CREATED_SUCCESSFULLY": "Chat created successfully",
   "CLINICS_FETCHED_SUCCESSFULLY": "Centers fetched successfully",
   "CLINIC_FETCHED_SUCCESSFULLY": "Center fetched successfully",
-  "CONCERNS_FETCHED": "Concerns fetched",
+  "CONCERNS_FETCHED": "Indications fetched",
   "DASHBOARD_DATA": "Dashboard data",
   "DEVICES_FETCHED_SUCCESSFULLY": "Devices fetched successfully",
   "DEVICES_NOT_FOUND": "Devices not found",

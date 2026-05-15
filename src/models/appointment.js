@@ -1436,7 +1436,7 @@ export const updateAppointmentConcerns = async (appointment_id, concerns) => {
         }
     } catch (error) {
         console.error("Database Error in updateAppointmentConcerns:", error.message);
-        throw new Error("Failed to update appointment concerns.");
+        throw new Error("Failed to update appointment indications.");
     }
 }
 

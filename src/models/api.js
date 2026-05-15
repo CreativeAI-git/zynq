@@ -1430,7 +1430,7 @@ export const getAllConcerns = async (lang = "en", concern_ids) => {
         return result;
     } catch (error) {
         console.error("Database Error:", error.message);
-        throw new Error("Failed to fetch concerns.");
+        throw new Error("Failed to fetch indications.");
     }
 };
 

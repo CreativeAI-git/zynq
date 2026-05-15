@@ -46,7 +46,26 @@ app.use(
 
 
 
-app.use(cors());
+const corsOrigins = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow non-browser clients (no Origin) and same-origin
+    if (!origin) return callback(null, true);
+    // If no allowlist configured, allow all origins (dev-friendly)
+    if (corsOrigins.length === 0) return callback(null, true);
+    return callback(null, corsOrigins.includes(origin));
+  },
+  credentials: true,
+  methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 app.use("/", express.static(path.join(__dirname, "src/uploads")));

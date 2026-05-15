@@ -252,7 +252,7 @@ export const generateTreatmentEmbeddings2 = async (req, res) => {
       // 1️⃣ Combined full-text block
       // -------------------------------------------------------
       const combinedText = `
-        ${row.name || ''} is a treatment designed to address ${row.concern_en || 'various skin concerns'}.
+        ${row.name || ''} is a treatment designed to address ${row.concern_en || 'various skin indications'}.
         ${row.description_en || 'This treatment helps rejuvenate and enhance the skin.'}
         It commonly uses devices like ${row.device_name || 'advanced medical-grade technology'}.
       `.trim();
@@ -349,7 +349,7 @@ export const generateTreatmentEmbeddingsV2 = async (id) => {
       // 🧠 FULL combined text (your original)
       // -------------------------------------------------------
       const combinedText = `
-${row.name || ''} is a treatment designed to address ${row.concern_en || 'various skin concerns'}.
+${row.name || ''} is a treatment designed to address ${row.concern_en || 'various skin indications'}.
 ${row.description_en || 'This treatment helps rejuvenate and enhance the skin.'}
 It commonly uses devices like ${row.device_name || 'advanced medical-grade technology'}.
       `;

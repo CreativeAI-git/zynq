@@ -792,7 +792,7 @@ export const faceScanPDFTemplate = ({
                     <img src="${APP_URL}Simplification_2.png" alt="Detailed Analysis Icon" width="40" style="display:block; margin:0 auto;">
                   </td>
                   <td valign="top" style="padding-left:10px;">
-                    <h4 style="font-size:16px; margin:0; color:#111111;">Detailed Analysis Of Concerns</h4>
+                    <h4 style="font-size:16px; margin:0; color:#111111;">Detailed Analysis Of Indications</h4>
                     <p style="font-size:13px; color:#555555; margin:5px 0 0 0; line-height:18px;">
                       Understand Specific Skin Issues Through AI-Powered Insights Covering Acne, Dark Spots, Wrinkles, And Elasticity Levels.
                     </p>
