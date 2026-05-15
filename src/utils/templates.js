@@ -8,6 +8,17 @@ const CLINIC_URL = process.env.CLINIC_URL;
 const formatForEmailSubject = (value) => {
   if (value == null) return "";
   return String(value)
+    // Remove noisy timezone suffixes often produced by Date#toString()
+    // Example: "Mon May 25 2026 08:00:00 GMT+0000 (Coordinated Universal Time)"
+    .replace(/\s*GMT[+-]\d{4}\s*(\([^)]+\))?/gi, "")
+    // Fix common missing-space cases like "MonMay" -> "Mon May"
+    .replace(/([A-Za-z]{3})([A-Z][a-z]{2})/g, "$1 $2")
+    // Fix other stuck-together words like "May25" -> "May 25"
+    .replace(/([A-Za-z])(\d)/g, "$1 $2")
+    // Fix "25May" -> "25 May"
+    .replace(/(\d)([A-Za-z])/g, "$1 $2")
+    // Ensure we don't end up with commas glued to words
+    .replace(/,([^\s])/g, ", $1")
     .replace(/<br\s*\/?>/gi, " ")
     .replace(/[\r\n\t]+/g, " ")
     .replace(/\s{2,}/g, " ")
