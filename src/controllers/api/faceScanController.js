@@ -159,7 +159,7 @@ export const get_all_concerns = async (req, res) => {
 
         return handleSuccess(res, 200, 'en', 'CONCERNS_FETCHED', concerns);
     } catch (error) {
-        console.error('Error fetching concerns:', error);
+        console.error('Error fetching indications:', error);
         return handleError(res, 500, 'en', 'INTERNAL_SERVER_ERROR');
     }
 };
@@ -193,7 +193,7 @@ export const get_treatments_by_concerns = async (req, res) => {
             return handleSuccess(res, 200, 'en', 'TREATMENTS_FETCHED', applyLanguageOverwrite(newTreatments, language));
         }
     } catch (error) {
-        console.error('Error fetching concerns:', error);
+        console.error('Error fetching indications:', error);
         return handleError(res, 500, 'en', 'INTERNAL_SERVER_ERROR');
     }
 };
