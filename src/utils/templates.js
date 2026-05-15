@@ -5,9 +5,18 @@ dotenv.config();
 const APP_URL = process.env.APP_URL;
 const CLINIC_URL = process.env.CLINIC_URL;
 
+const formatForEmailSubject = (value) => {
+  if (value == null) return "";
+  return String(value)
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+};
+
 export const appointmentBookedTemplate = {
   subject: ({ user_name, appointment_date }) =>
-    `New Appointment Booked by ${user_name} - Appointment Booked For ${appointment_date}`,
+    `New Appointment Booked by ${user_name} - Appointment Booked For ${formatForEmailSubject(appointment_date)}`,
 
   body: ({
     user_name,
@@ -67,7 +76,7 @@ export const appointmentBookedTemplate = {
 
 export const appointmentBookedTemplateSv = {
   subject: ({ user_name, appointment_date }) =>
-    `Ny bokad tid av ${user_name} - Tid bokad för ${appointment_date}`,
+    `Ny bokad tid av ${user_name} - Tid bokad för ${formatForEmailSubject(appointment_date)}`,
 
   body: ({
     user_name,
@@ -125,6 +134,224 @@ export const appointmentBookedTemplateSv = {
     `
 };
 
+
+export const appointmentCancelledDoctorTemplate = {
+  subject: ({ user_name, appointment_date }) =>
+    `Appointment Cancelled by ${user_name} - Appointment Was Scheduled For ${formatForEmailSubject(appointment_date)}`,
+
+  body: ({
+    user_name,
+    doctor_name,
+    appointment_date,
+    clinic_name
+  }) => `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Appointment Cancelled</title>
+    </head>
+    <body style="margin:0; font-family: Arial, sans-serif; background-color:#ffffff;">
+ 
+        <!-- Header -->
+        <div style="text-align:center; padding:20px 0; font-size:24px; font-weight:bold;">
+            ZYNQ
+        </div>
+ 
+        <!-- Title Section -->
+        <div style="background-color:#1e1e1e; color:#ffffff; padding:40px 20px; text-align:center;">
+            <h2 style="margin:0;">Appointment Cancelled by ${user_name}</h2>
+        </div>
+ 
+        <!-- Content -->
+        <div style="padding:20px; color:#333; max-width:600px; margin:0 auto;">
+            <p>Hi <strong>${doctor_name}</strong>,</p>
+ 
+            <p>The appointment has been cancelled via the app. Here are the appointment details:</p>
+ 
+            <p><strong>User Name:</strong> ${user_name}</p>
+            <p><strong>Expert Name:</strong> ${doctor_name}</p>
+            <p><strong>Clinic Name:</strong> ${clinic_name}</p>
+            <p><strong>Date & Time:</strong> ${appointment_date}</p>
+ 
+            <p>Best regards,<br/>
+            ZYNQ Team</p>
+        </div>
+ 
+        <!-- Footer -->
+        <div style="text-align:center; font-size:14px; color:#999; padding:20px;">
+            <hr style="border:none; border-top:1px solid #ddd; margin:20px 0;" />
+            <p>ZYNQ</p>
+        </div>
+ 
+    </body>
+    </html>
+    `
+};
+
+export const appointmentCancelledDoctorTemplateSv = {
+  subject: ({ user_name, appointment_date }) =>
+    `Avbokad tid av ${user_name} - Tid var bokad för ${formatForEmailSubject(appointment_date)}`,
+
+  body: ({
+    user_name,
+    doctor_name,
+    appointment_date,
+    clinic_name
+  }) => `
+    <!DOCTYPE html>
+    <html lang="sv">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Avbokad tid</title>
+    </head>
+    <body style="margin:0; font-family: Arial, sans-serif; background-color:#ffffff;">
+ 
+        <!-- Header -->
+        <div style="text-align:center; padding:20px 0; font-size:24px; font-weight:bold;">
+            ZYNQ
+        </div>
+ 
+        <!-- Title Section -->
+        <div style="background-color:#1e1e1e; color:#ffffff; padding:40px 20px; text-align:center;">
+            <h2 style="margin:0;">Avbokad tid av ${user_name}</h2>
+        </div>
+ 
+        <!-- Content -->
+        <div style="padding:20px; color:#333; max-width:600px; margin:0 auto;">
+            <p>Hej <strong>${doctor_name}</strong>,</p>
+ 
+            <p>Tiden har avbokats via appen. Här är detaljerna:</p>
+ 
+            <p><strong>Användarnamn:</strong> ${user_name}</p>
+            <p><strong>Expertnamn:</strong> ${doctor_name}</p>
+            <p><strong>Kliniknamn:</strong> ${clinic_name}</p>
+            <p><strong>Datum och tid:</strong> ${appointment_date}</p>
+ 
+            <p>Vänliga hälsningar,<br/>
+            ZYNQ-teamet</p>
+        </div>
+ 
+        <!-- Footer -->
+        <div style="text-align:center; font-size:14px; color:#999; padding:20px;">
+            <hr style="border:none; border-top:1px solid #ddd; margin:20px 0;" />
+            <p>ZYNQ</p>
+        </div>
+ 
+    </body>
+    </html>
+    `
+};
+
+export const appointmentCancelledUserTemplate = {
+  subject: ({ doctor_name, appointment_date }) =>
+    `Your Appointment Has Been Cancelled - ${doctor_name} - ${formatForEmailSubject(appointment_date)}`,
+
+  body: ({
+    user_name,
+    doctor_name,
+    appointment_date,
+    clinic_name
+  }) => `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Appointment Cancelled</title>
+    </head>
+    <body style="margin:0; font-family: Arial, sans-serif; background-color:#ffffff;">
+ 
+        <!-- Header -->
+        <div style="text-align:center; padding:20px 0; font-size:24px; font-weight:bold;">
+            ZYNQ
+        </div>
+ 
+        <!-- Title Section -->
+        <div style="background-color:#1e1e1e; color:#ffffff; padding:40px 20px; text-align:center;">
+            <h2 style="margin:0;">Your Appointment Has Been Cancelled</h2>
+        </div>
+ 
+        <!-- Content -->
+        <div style="padding:20px; color:#333; max-width:600px; margin:0 auto;">
+            <p>Hi <strong>${user_name}</strong>,</p>
+ 
+            <p>Your appointment has been cancelled. Here are the appointment details:</p>
+ 
+            <p><strong>Expert Name:</strong> ${doctor_name}</p>
+            <p><strong>Clinic Name:</strong> ${clinic_name}</p>
+            <p><strong>Date & Time:</strong> ${appointment_date}</p>
+ 
+            <p>Best regards,<br/>
+            ZYNQ Team</p>
+        </div>
+ 
+        <!-- Footer -->
+        <div style="text-align:center; font-size:14px; color:#999; padding:20px;">
+            <hr style="border:none; border-top:1px solid #ddd; margin:20px 0;" />
+            <p>ZYNQ</p>
+        </div>
+ 
+    </body>
+    </html>
+    `
+};
+
+export const appointmentCancelledUserTemplateSv = {
+  subject: ({ doctor_name, appointment_date }) =>
+    `Din tid har avbokats - ${doctor_name} - ${formatForEmailSubject(appointment_date)}`,
+
+  body: ({
+    user_name,
+    doctor_name,
+    appointment_date,
+    clinic_name
+  }) => `
+    <!DOCTYPE html>
+    <html lang="sv">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Avbokad tid</title>
+    </head>
+    <body style="margin:0; font-family: Arial, sans-serif; background-color:#ffffff;">
+ 
+        <!-- Header -->
+        <div style="text-align:center; padding:20px 0; font-size:24px; font-weight:bold;">
+            ZYNQ
+        </div>
+ 
+        <!-- Title Section -->
+        <div style="background-color:#1e1e1e; color:#ffffff; padding:40px 20px; text-align:center;">
+            <h2 style="margin:0;">Din tid har avbokats</h2>
+        </div>
+ 
+        <!-- Content -->
+        <div style="padding:20px; color:#333; max-width:600px; margin:0 auto;">
+            <p>Hej <strong>${user_name}</strong>,</p>
+ 
+            <p>Din tid har avbokats. Här är detaljerna:</p>
+ 
+            <p><strong>Expertnamn:</strong> ${doctor_name}</p>
+            <p><strong>Kliniknamn:</strong> ${clinic_name}</p>
+            <p><strong>Datum och tid:</strong> ${appointment_date}</p>
+ 
+            <p>Vänliga hälsningar,<br/>
+            ZYNQ-teamet</p>
+        </div>
+ 
+        <!-- Footer -->
+        <div style="text-align:center; font-size:14px; color:#999; padding:20px;">
+            <hr style="border:none; border-top:1px solid #ddd; margin:20px 0;" />
+            <p>ZYNQ</p>
+        </div>
+ 
+    </body>
+    </html>
+    `
+};
 
 export const orderConfirmationTemplate = ({
   orderDate,
