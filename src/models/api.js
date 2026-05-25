@@ -3350,6 +3350,7 @@ export const getTreatmentsBySearchOnly = async ({
       WHERE t.is_deleted = 0 AND t.approval_status = 'APPROVED'
 
       GROUP BY t.treatment_id
+      ORDER BY t.treatment_id
     `);
 
 
