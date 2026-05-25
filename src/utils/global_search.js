@@ -916,59 +916,122 @@ Related Terms: ${safeString(r.like_wise_terms) || ''}
   }));
 
 
-  const prompt = `
-You are a STRICT treatment similarity engine.
+//   const prompt = `
+// You are a STRICT treatment similarity engine.
 
-Your task:
-Compare the Search Query with the ITEM LIST
-and score ONLY by direct treatment relevance.
+// Your task:
+// Compare the Search Query with the ITEM LIST
+// and score ONLY by direct treatment relevance.
 
+// Search Query: "${searchQuery}"
+
+// Return ONLY this exact JSON:
+// {
+//   "results": [
+//     { "id": string, "score": number }
+//   ]
+// }
+
+// IMPORTANT RULES ABOUT IDs:
+// • You MUST ONLY return IDs from the ITEM LIST.
+// • Never invent or modify an ID.
+// • IDs are strings (UUIDs), NOT numbers.
+// • If unsure, return lower score, not a fake ID.
+
+// STRICT MATCHING RULES:
+// • Exact treatment category match = high score
+// • Different treatment categories = low score
+// • Do NOT match only because both are cosmetic/aesthetic treatments
+// • Botox, fillers, laser, RF, microneedling, peeling are DIFFERENT categories
+// • If query is "laser", then botox/fillers should score below 0.30
+// • If query is "botox", laser treatments should score below 0.30
+
+// SCORING:
+// • 0.90 – 1.00 = nearly exact match
+// • 0.75 – 0.89 = strong related treatment
+// • 0.40 – 0.60 = partial similarity only
+// • Below 0.40 = weak match
+
+// NEGATION RULE:
+// If query contains:
+//   - "non laser"
+//   - "not laser"
+//   - "without laser"
+// Then:
+//   a) Exclude laser-related treatments
+//   b) Match alternative non-laser treatments
+
+// VERY IMPORTANT:
+// • Never give medium/high score to unrelated treatment technologies
+// • Treatment technology matters more than cosmetic purpose
+// • Prefer precision over broad semantic similarity
+
+// ITEM LIST:
+// ${JSON.stringify(list)}
+
+// ALLOWED IDs:
+// ${JSON.stringify(rows.map(r => r.treatment_id))}
+// `;
+
+const prompt = `
+You are a strict similarity scoring engine.
+Your task is to compare each item in the ITEM LIST against the Search Query and assign an accurate similarity score based on intent, keywords, and semantic meaning.
 Search Query: "${searchQuery}"
-
-Return ONLY this exact JSON:
+Return ONLY this exact JSON format:
 {
-  "results": [
-    { "id": string, "score": number }
-  ]
+ "results": [
+   { "id": string, "score": number }
+ ]
 }
-
 IMPORTANT RULES ABOUT IDs:
-• You MUST ONLY return IDs from the ITEM LIST.
-• Never invent or modify an ID.
-• IDs are strings (UUIDs), NOT numbers.
-• If unsure, return lower score, not a fake ID.
-
-STRICT MATCHING RULES:
-• Exact treatment category match = high score
-• Different treatment categories = low score
-• Do NOT match only because both are cosmetic/aesthetic treatments
-• Botox, fillers, laser, RF, microneedling, peeling are DIFFERENT categories
-• If query is "laser", then botox/fillers should score below 0.30
-• If query is "botox", laser treatments should score below 0.30
-
-SCORING:
-• 0.90 – 1.00 = nearly exact match
-• 0.75 – 0.89 = strong related treatment
-• 0.40 – 0.60 = partial similarity only
-• Below 0.40 = weak match
-
-NEGATION RULE:
-If query contains:
-  - "non laser"
-  - "not laser"
-  - "without laser"
+• You MUST ONLY return IDs that exist in the ITEM LIST
+• Never invent, generate, edit, or modify any ID
+• IDs are strings (UUIDs), NOT numbers
+• If unsure, return a lower score instead of guessing
+• Every returned ID must exactly match an ID from the ITEM LIST
+SCORING RULES:
+• 0.85 – 1.00 = strong match
+• 0.60 – 0.84 = good match
+• 0.40 – 0.59 = medium match
+• 0.20 – 0.39 = weak match
+• 0.01 – 0.19 = very weak relation
+• Never return 0 unless the item is completely unrelated
+MATCHING RULES:
+• Exact intent match is MORE important than broad semantic similarity
+• Do NOT match items only because they belong to the same category
+• Understand spelling mistakes, abbreviations, and Swedish-English variations
+• Prefer exact treatment technology matches over generic cosmetic similarity
+• Penalize mismatched technologies heavily
+• Broad category similarity alone is NOT enough for a high score
+STRICT TECHNOLOGY RULES:
+• Laser treatments ≠ non-laser treatments
+• Facial treatments ≠ laser treatments
+• RF / EMS / ultrasound / massage / facial / skin tightening treatments are NOT laser unless explicitly stated
+• Only treat something as laser if the item clearly indicates laser-based technology
+LASER QUERY RULE:
+If the Search Query contains:
+• "laser"
 Then:
-  a) Exclude laser-related treatments
-  b) Match alternative non-laser treatments
-
-VERY IMPORTANT:
-• Never give medium/high score to unrelated treatment technologies
-• Treatment technology matters more than cosmetic purpose
-• Prefer precision over broad semantic similarity
-
+• Prioritize explicitly laser-based treatments
+• Strong laser matches should score 0.85+
+• Non-laser treatments must score below 0.35
+NEGATION RULE:
+If the Search Query contains:
+• "non laser"
+• "not laser"
+• "without laser"
+Then:
+• Laser-related treatments MUST score below 0.20
+• Prefer explicitly non-laser treatments
+• Non-laser alternatives may score normally
+• Do NOT return laser treatments as strong or good matches
+MATCHING LOGIC:
+• Exact keyword + exact intent + semantic relevance = highest score
+• Partial relevance = medium or weak score
+• Similar category but different technology = low score
+• If uncertain, prefer lower scores over aggressive matching
 ITEM LIST:
 ${JSON.stringify(list)}
-
 ALLOWED IDs:
 ${JSON.stringify(rows.map(r => r.treatment_id))}
 `;
