@@ -1038,7 +1038,7 @@ ${JSON.stringify(rows.map(r => r.treatment_id))}
 
   const res = await client.chat.completions.create({
     model: "gpt-4.1-mini",
-    temperature: 0.1,
+    temperature: 0,
     response_format: { type: "json_object" },
     messages: [
       {
