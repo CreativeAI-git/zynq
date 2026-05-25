@@ -238,7 +238,7 @@ export const addConsent = asyncHandler(async (req, res) => {
 export const generateAIResponse = async ({
   prompt,
   base64Image,
-  model = "gpt-4o-mini",
+  model = "gpt-5-mini",
   expectJson = true,
 }) => {
   try {
