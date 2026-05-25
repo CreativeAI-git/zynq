@@ -856,6 +856,47 @@ export const getClinicsVectorResult = async (rows, search, threshold = 0.4, topN
   return topN && topN > 0 ? results.slice(0, topN) : results;
 };
 
+function parseSimilarityResponse(raw, context = "similarity") {
+  if (typeof raw !== "string" || !raw.trim()) {
+    console.error(`[${context}] Empty or invalid model response`);
+    return [];
+  }
+
+  const normalizeJSON = (value) => value
+    .replace(/^\uFEFF/, "")
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .replace(/,\s*([}\]])/g, "$1")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'");
+
+  const candidates = [];
+  const trimmed = raw.trim();
+  candidates.push(trimmed);
+
+  const objectMatch = trimmed.match(/\{[\s\S]*\}/);
+  if (objectMatch?.[0]) candidates.push(objectMatch[0]);
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(normalizeJSON(candidate));
+      if (!Array.isArray(parsed?.results)) continue;
+
+      return parsed.results
+        .filter((row) => row && row.id !== undefined && row.score !== undefined)
+        .map((row) => ({
+          id: String(row.id),
+          score: Number.isFinite(Number(row.score)) ? Number(row.score) : 0,
+        }));
+    } catch {
+      // Try next candidate variant
+    }
+  }
+
+  console.error(`[${context}] Failed to parse model JSON response`);
+  return [];
+}
+
 async function batchGPTSimilarity(rows, searchQuery) {
 
   // const list = rows.map(r => ({
@@ -876,8 +917,11 @@ Related Terms: ${safeString(r.like_wise_terms) || ''}
 
 
   const prompt = `
-You are a similarity scoring engine.
-Compare each item in the list to the search query.
+You are a STRICT treatment similarity engine.
+
+Your task:
+Compare the Search Query with the ITEM LIST
+and score ONLY by direct treatment relevance.
 
 Search Query: "${searchQuery}"
 
@@ -894,13 +938,19 @@ IMPORTANT RULES ABOUT IDs:
 • IDs are strings (UUIDs), NOT numbers.
 • If unsure, return lower score, not a fake ID.
 
-SCORING RULES:
-• 0.85 – 1.0 strong match
-• 0.60 – 0.85 good match
-• 0.40 – 0.60 medium match
-• Medium similarity MUST stay in 0.40–0.60
-• Understand spelling errors & Swedish–English variants
-• Never output 0 unless 100% unrelated
+STRICT MATCHING RULES:
+• Exact treatment category match = high score
+• Different treatment categories = low score
+• Do NOT match only because both are cosmetic/aesthetic treatments
+• Botox, fillers, laser, RF, microneedling, peeling are DIFFERENT categories
+• If query is "laser", then botox/fillers should score below 0.30
+• If query is "botox", laser treatments should score below 0.30
+
+SCORING:
+• 0.90 – 1.00 = nearly exact match
+• 0.75 – 0.89 = strong related treatment
+• 0.40 – 0.60 = partial similarity only
+• Below 0.40 = weak match
 
 NEGATION RULE:
 If query contains:
@@ -909,7 +959,12 @@ If query contains:
   - "without laser"
 Then:
   a) Exclude laser-related treatments
-  b) Still match best semantic alternatives
+  b) Match alternative non-laser treatments
+
+VERY IMPORTANT:
+• Never give medium/high score to unrelated treatment technologies
+• Treatment technology matters more than cosmetic purpose
+• Prefer precision over broad semantic similarity
 
 ITEM LIST:
 ${JSON.stringify(list)}
@@ -919,7 +974,8 @@ ${JSON.stringify(rows.map(r => r.treatment_id))}
 `;
 
   const res = await client.chat.completions.create({
-    model: "gpt-5-mini",
+    model: "gpt-4.1-mini",
+    temperature: 0.1,
     response_format: { type: "json_object" },
     messages: [
       {
@@ -936,14 +992,7 @@ ${JSON.stringify(rows.map(r => r.treatment_id))}
   const raw = res.choices[0].message.content;
 
 
-  try {
-    const match = raw.match(/{[\s\S]*}/);
-    if (!match) return [];
-    return JSON.parse(match[0]).results || [];
-  } catch (err) {
-    console.error(err);
-    return [];
-  }
+  return parseSimilarityResponse(raw, "batchGPTSimilarity");
 }
 
 async function runSubTreatmentSimilarityBatch(batch, searchQuery) {
@@ -1009,14 +1058,7 @@ ${JSON.stringify(batch.map(r => r.treatment_id))}
 
   const raw = res.choices[0].message.content;
 
-  try {
-    const match = raw.match(/{[\s\S]*}/);
-    if (!match) return [];
-    return JSON.parse(match[0]).results || [];
-  } catch (err) {
-    console.error(err);
-    return [];
-  }
+  return parseSimilarityResponse(raw, "runSubTreatmentSimilarityBatch");
 }
 
 export async function batchGPTSimilaritySubTreatments(rows, searchQuery, batchSize = 100) {
@@ -1188,20 +1230,7 @@ ${list.join("\n")}
 
   const raw = res.choices[0].message.content;
 
-  try {
-    const match = raw.match(/{[\s\S]*}/);
-    if (!match) {
-      console.error("NO JSON RETURNED:", raw);
-      return [];
-    }
-
-    return JSON.parse(match[0]).results || [];
-
-  } catch (err) {
-    console.error("JSON Parse Error:", err);
-    console.log("RAW OUTPUT:", raw);
-    return [];
-  }
+  return parseSimilarityResponse(raw, "runDeviceSimilarityBatch");
 }
 
 
@@ -1303,12 +1332,7 @@ ${list.join("\n")}
 
   const raw = res.choices[0].message.content;
 
-  try {
-    return JSON.parse(raw).results || [];
-  } catch (err) {
-    console.error("JSON parse failed:", raw);
-    return [];
-  }
+  return parseSimilarityResponse(raw, "runSingleBatch");
 }
 
 export function applyAISimilarity(rows, scoreResults, {
