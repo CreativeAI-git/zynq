@@ -302,7 +302,7 @@ export async function translateFAQ(question, answer) {
 
         const res = await openai.chat.completions.create(
             {
-                model: "gpt-4o-mini",
+                model: "gpt-5-mini",
                 messages: [{ role: "user", content: prompt }],
                 response_format: { type: "json_object" },
             }
