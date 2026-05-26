@@ -5,6 +5,12 @@ import { handleError } from "../utils/responseHandler.js";
 const validate = (schema, type) => (req, res, next) => {
     const { error, value } = schema.validate(req[type], { convert: true });
     if (error) {
+        console.error("[VALIDATION_ERROR]", {
+            type,
+            message: error.details?.[0]?.message,
+            path: error.details?.[0]?.path,
+            body: req[type]
+        });
         return handleError(res, 400, "en", populateMessage(error));
     }
     req[type] = value;

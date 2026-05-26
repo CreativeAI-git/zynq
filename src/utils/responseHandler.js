@@ -1,11 +1,17 @@
 import { getMessage } from './getMessage.js';
 
 export const handleError = (res, statusCode, lang = 'en', messageKey) => {
-  return res.status(statusCode).send({
+  const payload = {
     success: false,
     status: statusCode,
     message: getMessage(messageKey, lang)
-  });
+  };
+
+  if (process.env.NODE_ENV !== "production") {
+    payload.error_key = messageKey;
+  }
+
+  return res.status(statusCode).send(payload);
 };
 
 export const handleSuccess = (res, statusCode, lang = 'en', messageKey, ...data) => {
