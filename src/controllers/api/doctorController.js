@@ -13,6 +13,7 @@ import { fetchChatById, getChatBetweenUsers } from "../../models/chat.js";
 import { formatBenefitsUnified, getTreatmentIDsByUserID } from "../../utils/misc.util.js";
 import { openai } from "../../../app.js";
 import { translator } from "../../utils/misc.util.js";
+import { mergeGraphAwareResults } from "../../utils/search_graph.util.js";
 
 
 /**
@@ -580,6 +581,30 @@ export const search_home_entities = asyncHandler(async (req, res) => {
             userModels.getTreatmentsBySearchOnly({ search: normalized_search, language, page, limit, actualSearch: search })
         ]);
 
+        // 2b) Relationship-aware graph expansion (device <-> treatment + mapped neighbors)
+        const relationExpansion = await userModels.getRelationshipAwareSearchExpansion({
+            search: normalized_search,
+            language,
+            seedDevices: devices,
+            seedTreatments: treatments
+        });
+
+        const mergedDevices = mergeGraphAwareResults(devices, relationExpansion.devices, {
+            keySelector: (row) => row?.id || `${row?.device_id || ""}:${row?.treatment_id || ""}`,
+            nameSelector: (row) => row?.device_name || "",
+            scoreSelector: (row) => row?.final_score ?? row?.score ?? 0,
+            primaryPriority: 1,
+            relatedDefaultPriority: 2
+        });
+
+        const mergedTreatments = mergeGraphAwareResults(treatments, relationExpansion.treatments, {
+            keySelector: (row) => row?.treatment_id,
+            nameSelector: (row) => row?.name || row?.swedish || "",
+            scoreSelector: (row) => row?.score ?? row?.final_score ?? row?.lexical_score ?? 0,
+            primaryPriority: 1,
+            relatedDefaultPriority: 2
+        });
+
 
         // 3️⃣ Enrich images (same as your code)
         const enrichedDoctors = doctors.map(doctor => ({
@@ -600,9 +625,9 @@ export const search_home_entities = asyncHandler(async (req, res) => {
             const key = entity.toLowerCase();
             if (key === "doctor") rankedResults.doctors = enrichedDoctors;
             if (key === "clinic") rankedResults.clinics = enrichedClinics;
-            if (key === "devices") rankedResults.devices = devices;
+            if (key === "devices") rankedResults.devices = mergedDevices;
             // if (key === "product") rankedResults.products = enrichedProducts;
-            if (key === "treatment") rankedResults.treatments = treatments;
+            if (key === "treatment") rankedResults.treatments = mergedTreatments;
         }
 
         // 5️⃣ Return ranked response
@@ -988,7 +1013,7 @@ export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res
 
 export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
-console.log("req.user language",language);
+console.log("req.user",language,"language");
     let { filters = {}, page, limit } = req.body || {};
 
     const search = filters.search?.trim() || "";

@@ -4,6 +4,7 @@ import { isEmpty } from "../utils/user_helper.js";
 import { getTreatmentsAIResult, getDoctorsVectorResult, getDoctorsAIResult, getClinicsAIResult, getDevicesAIResult, getSubTreatmentsAIResult } from "../utils/global_search.js"
 import { name } from "ejs";
 import { getClinicMappedTreatments } from "./clinic.js";
+import { mergeGraphAwareResults } from "../utils/search_graph.util.js";
 
 //======================================= Auth =========================================
 
@@ -3245,6 +3246,7 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
         let results = await db.query(`
         SELECT 
           d.id,
+          dt.device_id,
           dt.name AS device_name,
           dt.swedish AS device_swedish,
           d.treatment_id,
@@ -3266,6 +3268,255 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
     } catch (error) {
         console.error('Database Error in getDoctorsByFirstNameSearchOnly:', error.message);
         throw new Error('Failed to fetch doctors.');
+    }
+};
+
+export const getRelationshipAwareSearchExpansion = async ({
+    search = '',
+    language = 'en',
+    seedDevices = [],
+    seedTreatments = []
+}) => {
+    try {
+        const normalized = (search || '').trim().toLowerCase();
+        if (!normalized) return { devices: [], treatments: [] };
+
+        const like = `%${normalized}%`;
+
+        const exactDeviceRows = await db.query(`
+            SELECT DISTINCT
+                td.id,
+                d.device_id,
+                td.treatment_id,
+                d.name AS device_name,
+                d.swedish AS device_swedish,
+                t.name AS treatment_name,
+                t.swedish AS treatment_swedish
+            FROM tbl_devices d
+            INNER JOIN tbl_treatment_devices td ON td.device_id = d.device_id
+            INNER JOIN tbl_treatments t
+                ON t.treatment_id = td.treatment_id
+                AND t.is_deleted = 0
+                AND t.approval_status = 'APPROVED'
+            WHERE d.is_deleted = 0
+              AND d.approval_status = 'APPROVED'
+              AND (
+                LOWER(d.name) = ?
+                OR LOWER(d.swedish) = ?
+                OR LOWER(d.name) LIKE ?
+                OR LOWER(d.swedish) LIKE ?
+                OR LOWER(IFNULL(td.device_name, '')) = ?
+                OR LOWER(IFNULL(td.device_name, '')) LIKE ?
+              )
+        `, [normalized, normalized, like, like, normalized, like]);
+
+        const exactTreatmentRows = await db.query(`
+            SELECT DISTINCT t.treatment_id
+            FROM tbl_treatments t
+            LEFT JOIN tbl_treatment_like_wise_terms tlwt
+                ON tlwt.treatment_id = t.treatment_id
+            LEFT JOIN tbl_likewise_terms lwt
+                ON lwt.like_wise_term_id = tlwt.like_wise_term_id
+                AND lwt.is_deleted = 0
+                AND lwt.approval_status = 'APPROVED'
+            WHERE t.is_deleted = 0
+              AND t.approval_status = 'APPROVED'
+              AND (
+                LOWER(t.name) = ?
+                OR LOWER(t.swedish) = ?
+                OR LOWER(t.name) LIKE ?
+                OR LOWER(t.swedish) LIKE ?
+                OR LOWER(IFNULL(lwt.name, '')) = ?
+                OR LOWER(IFNULL(lwt.swedish, '')) = ?
+                OR LOWER(IFNULL(lwt.name, '')) LIKE ?
+                OR LOWER(IFNULL(lwt.swedish, '')) LIKE ?
+              )
+        `, [normalized, normalized, like, like, normalized, normalized, like, like]);
+
+        const deviceSeedIds = new Set([
+            ...seedDevices.map((d) => d?.device_id).filter(Boolean),
+            ...exactDeviceRows.map((d) => d?.device_id).filter(Boolean)
+        ]);
+
+        const treatmentSeedIds = new Set([
+            ...seedTreatments.map((t) => t?.treatment_id).filter(Boolean),
+            ...seedDevices.map((d) => d?.treatment_id).filter(Boolean),
+            ...exactDeviceRows.map((d) => d?.treatment_id).filter(Boolean),
+            ...exactTreatmentRows.map((t) => t?.treatment_id).filter(Boolean)
+        ]);
+
+        let relatedTreatmentRows = [];
+        if (deviceSeedIds.size > 0) {
+            relatedTreatmentRows = await db.query(`
+                SELECT DISTINCT td.treatment_id
+                FROM tbl_treatment_devices td
+                INNER JOIN tbl_treatments t
+                    ON t.treatment_id = td.treatment_id
+                    AND t.is_deleted = 0
+                    AND t.approval_status = 'APPROVED'
+                WHERE td.device_id IN (?)
+            `, [Array.from(deviceSeedIds)]);
+        }
+
+        relatedTreatmentRows.forEach((row) => {
+            if (row?.treatment_id) treatmentSeedIds.add(row.treatment_id);
+        });
+
+        let relatedDeviceRows = [];
+        if (treatmentSeedIds.size > 0) {
+            relatedDeviceRows = await db.query(`
+                SELECT DISTINCT
+                    td.id,
+                    d.device_id,
+                    td.treatment_id,
+                    d.name AS device_name,
+                    d.swedish AS device_swedish,
+                    t.name AS treatment_name,
+                    t.swedish AS treatment_swedish
+                FROM tbl_treatment_devices td
+                INNER JOIN tbl_devices d
+                    ON d.device_id = td.device_id
+                    AND d.is_deleted = 0
+                    AND d.approval_status = 'APPROVED'
+                INNER JOIN tbl_treatments t
+                    ON t.treatment_id = td.treatment_id
+                    AND t.is_deleted = 0
+                    AND t.approval_status = 'APPROVED'
+                WHERE td.treatment_id IN (?)
+            `, [Array.from(treatmentSeedIds)]);
+        }
+
+        const finalTreatmentIds = Array.from(treatmentSeedIds);
+        let treatmentDetails = [];
+        if (finalTreatmentIds.length > 0) {
+            treatmentDetails = await db.query(`
+                SELECT 
+                    t.treatment_id,
+                    t.name,
+                    t.swedish,
+                    t.classification_type,
+                    t.description_en,
+                    t.description_sv,
+                    GROUP_CONCAT(DISTINCT lwt.name ORDER BY lwt.name SEPARATOR ',') AS like_wise_terms,
+                    GROUP_CONCAT(DISTINCT lwt.swedish ORDER BY lwt.name SEPARATOR ',') AS like_wise_terms_swedish,
+                    GROUP_CONCAT(DISTINCT tb.name ORDER BY tb.name SEPARATOR ',') AS benefits_en,
+                    GROUP_CONCAT(DISTINCT tb.swedish ORDER BY tb.name SEPARATOR ',') AS benefits_sv,
+                    GROUP_CONCAT(DISTINCT tbd.name ORDER BY tbd.name SEPARATOR ',') AS device_name,
+                    GROUP_CONCAT(DISTINCT tbd.swedish ORDER BY tbd.name SEPARATOR ',') AS device_name_swedish
+                FROM tbl_treatments t
+                LEFT JOIN tbl_treatment_like_wise_terms tlwt
+                    ON tlwt.treatment_id = t.treatment_id
+                LEFT JOIN tbl_likewise_terms lwt
+                    ON lwt.like_wise_term_id = tlwt.like_wise_term_id
+                    AND lwt.is_deleted = 0
+                    AND lwt.approval_status = 'APPROVED'
+                LEFT JOIN tbl_treatment_benefits ttb
+                    ON ttb.treatment_id = t.treatment_id
+                LEFT JOIN tbl_benefits tb
+                    ON tb.benefit_id = ttb.benefit_id
+                    AND tb.is_deleted = 0
+                    AND tb.approval_status = 'APPROVED'
+                LEFT JOIN tbl_treatment_devices td
+                    ON td.treatment_id = t.treatment_id
+                LEFT JOIN tbl_devices tbd
+                    ON tbd.device_id = td.device_id
+                    AND tbd.is_deleted = 0
+                    AND tbd.approval_status = 'APPROVED'
+                WHERE t.is_deleted = 0
+                  AND t.approval_status = 'APPROVED'
+                  AND t.treatment_id IN (?)
+                GROUP BY t.treatment_id
+            `, [finalTreatmentIds]);
+        }
+
+        const exactTreatmentIdSet = new Set(exactTreatmentRows.map((r) => r.treatment_id));
+        const exactDeviceMapIdSet = new Set(exactDeviceRows.map((r) => r.id));
+        const directTreatmentIdSet = new Set(relatedTreatmentRows.map((r) => r.treatment_id));
+
+        const treatmentRelationMap = new Map();
+        treatmentDetails.forEach((row) => {
+            if (exactTreatmentIdSet.has(row.treatment_id)) {
+                treatmentRelationMap.set(row.treatment_id, { priority: 1, type: "exact_match" });
+            } else if (directTreatmentIdSet.has(row.treatment_id)) {
+                treatmentRelationMap.set(row.treatment_id, { priority: 2, type: "direct_relation" });
+            } else {
+                treatmentRelationMap.set(row.treatment_id, { priority: 3, type: "synonym_relation" });
+            }
+        });
+
+        const subTreatments = finalTreatmentIds.length > 0
+            ? await db.query(`
+                SELECT
+                    tts.treatment_id,
+                    GROUP_CONCAT(DISTINCT stm.name ORDER BY stm.name SEPARATOR ',') AS sub_treatments_en,
+                    GROUP_CONCAT(DISTINCT stm.swedish ORDER BY stm.name SEPARATOR ',') AS sub_treatments_sv
+                FROM tbl_treatment_sub_treatments tts
+                INNER JOIN tbl_sub_treatment_master stm
+                    ON stm.sub_treatment_id = tts.sub_treatment_id
+                    AND stm.is_deleted = 0
+                    AND stm.approval_status = 'APPROVED'
+                WHERE tts.treatment_id IN (?)
+                GROUP BY tts.treatment_id
+            `, [finalTreatmentIds])
+            : [];
+
+        const concerns = finalTreatmentIds.length > 0
+            ? await db.query(`
+                SELECT
+                    tc.treatment_id,
+                    GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ',') AS concerns_en,
+                    GROUP_CONCAT(DISTINCT c.swedish ORDER BY c.name SEPARATOR ',') AS concerns_sv
+                FROM tbl_treatment_concerns tc
+                INNER JOIN tbl_concerns c
+                    ON c.concern_id = tc.concern_id
+                    AND c.is_deleted = 0
+                    AND c.approval_status = 'APPROVED'
+                WHERE tc.treatment_id IN (?)
+                GROUP BY tc.treatment_id
+            `, [finalTreatmentIds])
+            : [];
+
+        const subMap = new Map(subTreatments.map((r) => [r.treatment_id, r]));
+        const concernMap = new Map(concerns.map((r) => [r.treatment_id, r]));
+
+        const enrichedTreatments = treatmentDetails.map((row) => {
+            const relation = treatmentRelationMap.get(row.treatment_id) || { priority: 3, type: "synonym_relation" };
+            const sub = subMap.get(row.treatment_id);
+            const concern = concernMap.get(row.treatment_id);
+
+            return {
+                ...row,
+                name: language === "en" ? row.name : row.swedish,
+                description: language === "en" ? row.description_en : row.description_sv,
+                benefits: language === "en" ? row.benefits_en : row.benefits_sv,
+                device_name: language === "en" ? row.device_name : (row.device_name_swedish || row.device_name),
+                like_wise_terms: language === "en" ? row.like_wise_terms : (row.like_wise_terms_swedish || row.like_wise_terms),
+                linked_sub_treatments: language === "en"
+                    ? (sub?.sub_treatments_en || "")
+                    : (sub?.sub_treatments_sv || sub?.sub_treatments_en || ""),
+                linked_concerns: language === "en"
+                    ? (concern?.concerns_en || "")
+                    : (concern?.concerns_sv || concern?.concerns_en || ""),
+                relation_priority: relation.priority,
+                relation_match_type: relation.type
+            };
+        });
+
+        const enrichedDevices = relatedDeviceRows.map((row) => ({
+            ...row,
+            relation_priority: exactDeviceMapIdSet.has(row.id) ? 1 : 2,
+            relation_match_type: exactDeviceMapIdSet.has(row.id) ? "exact_match" : "direct_relation",
+            device_name: language === "en" ? row.device_name : (row.device_swedish || row.device_name),
+            treatment_name: language === "en" ? row.treatment_name : (row.treatment_swedish || row.treatment_name)
+        }));
+
+        return {
+            devices: enrichedDevices,
+            treatments: enrichedTreatments
+        };
+    } catch (error) {
+        console.error("Database Error in getRelationshipAwareSearchExpansion:", error.message);
+        return { devices: [], treatments: [] };
     }
 };
 
@@ -3354,10 +3605,28 @@ export const getTreatmentsBySearchOnly = async ({
     `);
 
 
-        // 2️⃣ Compute top similar rows using embedding
-        results = await getTreatmentsAIResult(results, search, 0.4, null, language, actualSearch);
+        // 2️⃣ Primary treatment ranking
+        const primaryResults = await getTreatmentsAIResult(results, search, 0.4, null, language, actualSearch);
 
-        // 3️⃣ Apply pagination
+        // 3️⃣ Relationship-aware expansion (device -> treatment, synonym -> canonical treatment)
+        const relationExpansion = await getRelationshipAwareSearchExpansion({
+            search,
+            language,
+            seedTreatments: primaryResults,
+            seedDevices: []
+        });
+
+        // 4️⃣ Merge by strict priority:
+        // exact/primary > direct relation > synonym relation
+        results = mergeGraphAwareResults(primaryResults, relationExpansion.treatments, {
+            keySelector: (row) => row?.treatment_id,
+            nameSelector: (row) => row?.name || row?.swedish || "",
+            scoreSelector: (row) => row?.score ?? row?.final_score ?? row?.lexical_score ?? 0,
+            primaryPriority: 1,
+            relatedDefaultPriority: 2
+        });
+
+        // 5️⃣ Apply pagination
         results = paginateRows(results, limit, page);
 
         return results;
