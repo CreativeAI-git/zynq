@@ -237,6 +237,7 @@ function isRowExcludedByNegation(text, queryInfo) {
 }
 
 const TREATMENT_SEARCH_CACHE = new Map();
+const TREATMENT_INFLIGHT_REQUESTS = new Map();
 const TREATMENT_CACHE_TTL_MS = 5 * 60 * 1000;
 
 function hashString(value = "") {
@@ -295,6 +296,25 @@ function treatmentTieBreaker(a, b) {
   const aName = normalizeText(a.name || a.swedish || "");
   const bName = normalizeText(b.name || b.swedish || "");
   return aName.localeCompare(bName);
+}
+
+function resolveCachedTreatmentRows(rows, cachedRankings = []) {
+  const rowsById = new Map(rows.map((r) => [r.treatment_id, r]));
+  return cachedRankings
+    .map((item) => {
+      const base = rowsById.get(item.treatment_id);
+      if (!base) return null;
+      return {
+        ...base,
+        score: item.score,
+        lexical_score: item.lexical_score,
+        semantic_score: item.semantic_score,
+        exact_match: item.exact_match,
+        is_fallback: item.is_fallback,
+        match_stage: item.match_stage
+      };
+    })
+    .filter(Boolean);
 }
 
 // --------------------------------------
@@ -432,123 +452,166 @@ export const getTreatmentsAIResult = async (
   const cachedRankings = getCachedTreatmentRankings(cacheKey);
 
   if (cachedRankings?.length) {
-    const rowsById = new Map(rows.map((r) => [r.treatment_id, r]));
-    const cachedResolved = cachedRankings
-      .map((item) => {
-        const base = rowsById.get(item.treatment_id);
-        if (!base) return null;
-        return {
-          ...base,
-          score: item.score,
-          lexical_score: item.lexical_score,
-          semantic_score: item.semantic_score,
-          exact_match: item.exact_match,
-          is_fallback: item.is_fallback,
-          match_stage: item.match_stage
-        };
-      })
-      .filter(Boolean);
+    const cachedResolved = resolveCachedTreatmentRows(rows, cachedRankings);
 
     const translatedFromCache = cachedResolved.map((result) => ({
       ...result,
       name: language === "en" ? result.name : result.swedish,
       benefits: language === "en" ? result.benefits_en : result.benefits_sv,
+      like_wise_terms: language === "en"
+        ? result.like_wise_terms
+        : (result.like_wise_terms_swedish || result.like_wise_terms),
+      device_name: language === "en"
+        ? result.device_name
+        : (result.device_name_swedish || result.device_name),
       description: language === "en" ? result.description_en : result.description_sv
     }));
 
     return topN ? translatedFromCache.slice(0, topN) : translatedFromCache;
   }
 
-  const prepared = rows.map((row) => {
-    const matchText = buildTreatmentMatchText(row);
-    const lexicalScore = computeLexicalScore(matchText, queryInfo, row);
-    const normalizedQuery = queryInfo.normalized;
-    const rowName = normalizeText(row.name || "");
-    const rowSwedish = normalizeText(row.swedish || "");
-    const exactMatch = (rowName === normalizedQuery || rowSwedish === normalizedQuery) ? 1 : 0;
-    return {
-      ...row,
-      _matchText: matchText,
-      _lexicalScore: lexicalScore,
-      _exactMatch: exactMatch
-    };
-  });
+  const inFlight = TREATMENT_INFLIGHT_REQUESTS.get(cacheKey);
+  if (inFlight) {
+    try {
+      await inFlight;
+    } catch {
+      // If the in-flight request failed, continue with fresh compute below.
+    }
 
-  let guarded = prepared
-    .filter((row) => !isRowExcludedByNegation(row._matchText, queryInfo))
-    .filter((row) => isRowInIntentCategory(row._matchText, row, queryInfo));
+    const warmedRankings = getCachedTreatmentRankings(cacheKey);
+    if (warmedRankings?.length) {
+      const warmedResolved = resolveCachedTreatmentRows(rows, warmedRankings);
+      const translatedWarmed = warmedResolved.map((result) => ({
+        ...result,
+        name: language === "en" ? result.name : result.swedish,
+        benefits: language === "en" ? result.benefits_en : result.benefits_sv,
+        like_wise_terms: language === "en"
+          ? result.like_wise_terms
+          : (result.like_wise_terms_swedish || result.like_wise_terms),
+        device_name: language === "en"
+          ? result.device_name
+          : (result.device_name_swedish || result.device_name),
+        description: language === "en" ? result.description_en : result.description_sv
+      }));
 
-  // If strict intent has no guarded candidates, keep it strict and avoid cross-category leakage.
-  if (!guarded.length && queryInfo.intentType !== "strict_category") {
-    guarded = prepared.filter((row) => !isRowExcludedByNegation(row._matchText, queryInfo));
+      return topN ? translatedWarmed.slice(0, topN) : translatedWarmed;
+    }
   }
 
-  const gptCandidates =
-    queryInfo.intentType === "strict_category"
-      ? guarded.filter((r) => r._lexicalScore >= 0.45)
-      : guarded;
+  const computeRankingsPromise = (async () => {
+    const prepared = rows.map((row) => {
+      const matchText = buildTreatmentMatchText(row);
+      const lexicalScore = computeLexicalScore(matchText, queryInfo, row);
+      const normalizedQuery = queryInfo.normalized;
+      const rowName = normalizeText(row.name || "");
+      const rowSwedish = normalizeText(row.swedish || "");
+      const exactMatch = (rowName === normalizedQuery || rowSwedish === normalizedQuery) ? 1 : 0;
+      return {
+        ...row,
+        _matchText: matchText,
+        _lexicalScore: lexicalScore,
+        _exactMatch: exactMatch
+      };
+    });
 
-  const scoreResults = gptCandidates.length
-    ? await batchGPTSimilarity(gptCandidates, queryInfo.normalized)
-    : [];
+    let guarded = prepared
+      .filter((row) => !isRowExcludedByNegation(row._matchText, queryInfo))
+      .filter((row) => isRowInIntentCategory(row._matchText, row, queryInfo));
 
-  const scoreMap = new Map(scoreResults.map((r) => [r.id, r.score]));
+    // If strict intent has no guarded candidates, keep it strict and avoid cross-category leakage.
+    if (!guarded.length && queryInfo.intentType !== "strict_category") {
+      guarded = prepared.filter((row) => !isRowExcludedByNegation(row._matchText, queryInfo));
+    }
 
-  const scored = guarded.map((r) => {
-    const gptScore = scoreMap.get(r.treatment_id) ?? 0;
-    const lexical = r._lexicalScore;
-    const finalScore = queryInfo.intentType === "strict_category"
-      ? (0.75 * lexical) + (0.25 * gptScore)
-      : (0.45 * lexical) + (0.55 * gptScore);
+    // For mapped intents (strict/broad), keep ranking deterministic and language-independent.
+    // Use semantic model only for general/free-form queries.
+    const shouldUseSemantic = queryInfo.intentType === "general";
 
-    const exactCategoryHit = queryInfo.strictIntent && isRowInIntentCategory(r._matchText, r, queryInfo);
+    const gptCandidates = shouldUseSemantic
+      ? guarded
+      : [];
 
-    return {
-      ...r,
-      lexical_score: lexical,
-      semantic_score: gptScore,
-      exact_match: r._exactMatch,
-      score: Math.min(finalScore + (exactCategoryHit ? 0.08 : 0), 1)
-    };
-  });
+    const scoreResults = (shouldUseSemantic && gptCandidates.length)
+      ? await batchGPTSimilarity(gptCandidates, queryInfo.normalized)
+      : [];
 
-  const primaryThreshold = queryInfo.intentType === "strict_category"
-    ? Math.max(0.55, threshold)
-    : Math.max(0.45, threshold);
+    const scoreMap = new Map(scoreResults.map((r) => [r.id, r.score]));
 
-  const primary = scored
-    .filter((r) => r.score >= primaryThreshold || r._lexicalScore >= 0.78)
-    .map((r) => ({ ...r, is_fallback: false, match_stage: "primary" }))
-    .sort(treatmentTieBreaker);
+    const scored = guarded.map((r) => {
+      const gptScore = scoreMap.get(r.treatment_id) ?? 0;
+      const lexical = r._lexicalScore;
+      const finalScore = shouldUseSemantic
+        ? (0.45 * lexical) + (0.55 * gptScore)
+        : lexical;
 
-  // Fallback is only for broad/general intents and always appended after primary.
-  const fallback = (queryInfo.intentType === "strict_category" || primary.length > 0)
-    ? []
-    : scored
-      .filter((r) => r.score >= 0.32)
-      .sort(treatmentTieBreaker)
-      .slice(0, 8)
-      .map((r) => ({ ...r, is_fallback: true, match_stage: "fallback" }));
+      const exactCategoryHit = queryInfo.strictIntent && isRowInIntentCategory(r._matchText, r, queryInfo);
 
-  const filtered = [...primary, ...fallback];
+      return {
+        ...r,
+        lexical_score: lexical,
+        semantic_score: gptScore,
+        exact_match: r._exactMatch,
+        score: Math.min(finalScore + (exactCategoryHit ? 0.08 : 0), 1)
+      };
+    });
 
-  setCachedTreatmentRankings(
-    cacheKey,
-    filtered.map((r) => ({
-      treatment_id: r.treatment_id,
-      score: r.score ?? 0,
-      lexical_score: r.lexical_score ?? 0,
-      semantic_score: r.semantic_score ?? 0,
-      exact_match: r.exact_match ?? 0,
-      is_fallback: Boolean(r.is_fallback),
-      match_stage: r.match_stage || "primary"
-    }))
-  );
+    const primaryThreshold = queryInfo.intentType === "strict_category"
+      ? Math.max(0.55, threshold)
+      : Math.max(0.45, threshold);
+
+    const primary = scored
+      .filter((r) => r.score >= primaryThreshold || r._lexicalScore >= 0.78)
+      .map((r) => ({ ...r, is_fallback: false, match_stage: "primary" }))
+      .sort(treatmentTieBreaker);
+
+    // Fallback is only for broad/general intents and always appended after primary.
+    const fallback = (queryInfo.intentType === "strict_category" || primary.length > 0)
+      ? []
+      : scored
+        .filter((r) => r.score >= 0.32)
+        .sort(treatmentTieBreaker)
+        .slice(0, 8)
+        .map((r) => ({ ...r, is_fallback: true, match_stage: "fallback" }));
+
+    const filtered = [...primary, ...fallback];
+
+    setCachedTreatmentRankings(
+      cacheKey,
+      filtered.map((r) => ({
+        treatment_id: r.treatment_id,
+        score: r.score ?? 0,
+        lexical_score: r.lexical_score ?? 0,
+        semantic_score: r.semantic_score ?? 0,
+        exact_match: r.exact_match ?? 0,
+        is_fallback: Boolean(r.is_fallback),
+        match_stage: r.match_stage || "primary"
+      }))
+    );
+
+    return filtered;
+  })();
+
+  TREATMENT_INFLIGHT_REQUESTS.set(cacheKey, computeRankingsPromise);
+
+  let filtered;
+  try {
+    filtered = await computeRankingsPromise;
+  } finally {
+    if (TREATMENT_INFLIGHT_REQUESTS.get(cacheKey) === computeRankingsPromise) {
+      TREATMENT_INFLIGHT_REQUESTS.delete(cacheKey);
+    }
+  }
 
   const translated = filtered.map(result => ({
     ...result,
     name: language === "en" ? result.name : result.swedish,
     benefits: language === "en" ? result.benefits_en : result.benefits_sv,
+    like_wise_terms: language === "en"
+      ? result.like_wise_terms
+      : (result.like_wise_terms_swedish || result.like_wise_terms),
+    device_name: language === "en"
+      ? result.device_name
+      : (result.device_name_swedish || result.device_name),
     description: language === "en"
       ? result.description_en
       : result.description_sv
@@ -1638,7 +1701,7 @@ ${list.join("\n")}
 
   const res = await client.chat.completions.create({
     model: "gpt-4.1-mini",
-    temperature: 0,
+    temperature: 0.3,
     max_tokens: 4096,
     response_format: { type: "json_object" },
     messages: [
@@ -1742,7 +1805,7 @@ ${list.join("\n")}
 
   const res = await client.chat.completions.create({
     model: "gpt-4.1-mini",
-    temperature: 0,
+    temperature: 0.3,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: "Output ONLY JSON. No markdown." },
