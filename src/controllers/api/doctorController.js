@@ -988,7 +988,7 @@ export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res
 
 export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
-
+console.log("req.user language",language);
     let { filters = {}, page, limit } = req.body || {};
 
     const search = filters.search?.trim() || "";
