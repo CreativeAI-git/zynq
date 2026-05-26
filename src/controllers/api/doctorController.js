@@ -744,7 +744,8 @@ async function detectSearchIntent(searchQuery) {
 
 
     const response = await openai.chat.completions.create({
-        model: "gpt-5-mini",
+        model: "gpt-4.1-mini",
+        temperature: 0,
         messages: [{ role: "user", content: prompt }],
     });
 

@@ -1465,7 +1465,8 @@ ${JSON.stringify(batch.map(r => r.sub_treatment_id))}
 `;
 
   const res = await client.chat.completions.create({
-    model: "gpt-5-mini",
+    model: "gpt-4.1-mini",
+    temperature: 0,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: "You output ONLY valid JSON. No extra text. No markdown." },
@@ -1636,7 +1637,8 @@ ${list.join("\n")}
   //   `;
 
   const res = await client.chat.completions.create({
-    model: "gpt-5-mini",
+    model: "gpt-4.1-mini",
+    temperature: 0,
     max_tokens: 4096,
     response_format: { type: "json_object" },
     messages: [
@@ -1739,7 +1741,8 @@ ${list.join("\n")}
 `;
 
   const res = await client.chat.completions.create({
-    model: "gpt-5-mini",
+    model: "gpt-4.1-mini",
+    temperature: 0,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: "Output ONLY JSON. No markdown." },
