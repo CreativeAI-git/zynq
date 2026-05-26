@@ -67,7 +67,45 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 app.use(express.json({ limit: "100mb" }));
+app.use(express.text({ type: "text/plain", limit: "100mb" }));
 app.use(express.urlencoded({ extended: true, limit: "100mb" }));
+
+// Accept JSON sent as text/plain from clients like Postman (misconfigured header cases)
+app.use((req, res, next) => {
+  if (typeof req.body !== "string") return next();
+
+  const raw = req.body.trim();
+  if (!raw) {
+    req.body = {};
+    return next();
+  }
+
+  if (raw.startsWith("{") || raw.startsWith("[")) {
+    try {
+      req.body = JSON.parse(raw);
+      return next();
+    } catch {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid JSON payload. Please check request body formatting."
+      });
+    }
+  }
+
+  return next();
+});
+
+// Handle malformed JSON payloads gracefully
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid JSON payload. Please check request body formatting."
+    });
+  }
+  return next(err);
+});
+
 app.use("/", express.static(path.join(__dirname, "src/uploads")));
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "src/views"));

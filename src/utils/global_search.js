@@ -55,6 +55,248 @@ const phraseMeaningSimilarity = (a, b) => {
   return total / aTokens.length;
 };
 
+const STRICT_INTENT_SYNONYMS = {
+  laser: [
+    "laser",
+    "laser treatment",
+    "laser treatments",
+    "laserbehandling",
+    "laserbehandlingar",
+    "laserbehandlingen",
+    "nd yag",
+    "ndyag",
+    "ipl laser"
+  ],
+  botox: ["botox", "botulinum toxin", "botulinum", "bo tox"],
+  filler: ["filler", "fillers", "dermal filler", "dermal fillers"],
+  prp: ["prp", "platelet rich plasma", "vampire facial"],
+  hydrafacial: ["hydrafacial", "hydra facial", "hydrafacial treatment"],
+  morpheus8: ["morpheus8", "morpheus 8", "morpheus-eight"],
+  emsella: ["emsella", "em-sella"],
+  skinbooster: ["skinbooster", "skin booster", "skinboosters", "skin boosters"],
+  facial: ["facial", "facials", "ansiktsbehandling", "ansiktsbehandlingar"]
+};
+
+const BROAD_CONCERN_SYNONYMS = {
+  acne: ["acne", "akne", "breakout", "breakouts", "pimple", "pimples"],
+  wrinkles: ["wrinkle", "wrinkles", "fine lines", "linjer"],
+  pigmentation: ["pigmentation", "pigmentering", "melasma", "dark spots"],
+  skin_tightening: ["skin tightening", "huduppstramning", "tightening", "firming"],
+  hair_removal: ["hair removal", "harborttagning", "h\u00e5rborttagning"]
+};
+
+const NEGATIVE_PATTERNS = [
+  /\bnon[\s-]?laser\b/i,
+  /\bnot[\s-]?laser\b/i,
+  /\bwithout[\s-]?laser\b/i,
+  /\blaser[\s-]?free\b/i,
+  /\binte[\s-]?laser\b/i,
+  /\butan[\s-]?laser\b/i
+];
+
+const TOKEN_REWRITE = {
+  "morpheus 8": "morpheus8",
+  "nd:yag": "nd yag",
+  "n d yag": "nd yag",
+  "laserbehandling": "laser treatment",
+  "ansiktsbehandling": "facial treatment",
+  "harborttagning": "hair removal",
+  "h\u00e5rborttagning": "hair removal",
+  "pigmentering": "pigmentation",
+  "akne": "acne",
+  "huduppstramning": "skin tightening"
+};
+
+function normalizeText(value = "") {
+  let out = String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s:+-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  for (const [from, to] of Object.entries(TOKEN_REWRITE)) {
+    const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp(`\\b${escaped}\\b`, "g"), to);
+  }
+
+  return out.replace(/\s+/g, " ").trim();
+}
+
+function includesPhrase(haystack, phrase) {
+  if (!haystack || !phrase) return false;
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b${escaped}\\b`, "i").test(haystack);
+}
+
+function detectCanonicalIntent(rawSearch = "") {
+  const normalized = normalizeText(rawSearch);
+  const hasNegation = NEGATIVE_PATTERNS.some((re) => re.test(normalized));
+
+  let strictIntent = null;
+  let strictMatchedPhrase = "";
+  for (const [intent, synonyms] of Object.entries(STRICT_INTENT_SYNONYMS)) {
+    for (const synonym of synonyms) {
+      const normSyn = normalizeText(synonym);
+      if (includesPhrase(normalized, normSyn) && normSyn.length > strictMatchedPhrase.length) {
+        strictIntent = intent;
+        strictMatchedPhrase = normSyn;
+      }
+    }
+  }
+
+  let broadIntent = null;
+  let broadMatchedPhrase = "";
+  for (const [intent, synonyms] of Object.entries(BROAD_CONCERN_SYNONYMS)) {
+    for (const synonym of synonyms) {
+      const normSyn = normalizeText(synonym);
+      if (includesPhrase(normalized, normSyn) && normSyn.length > broadMatchedPhrase.length) {
+        broadIntent = intent;
+        broadMatchedPhrase = normSyn;
+      }
+    }
+  }
+
+  const language = /[\u00e5\u00e4\u00f6]/i.test(rawSearch) ? "sv" : "en";
+  const intentType = strictIntent
+    ? "strict_category"
+    : broadIntent
+      ? "broad_concern"
+      : "general";
+
+  return {
+    raw: rawSearch,
+    normalized,
+    language,
+    intentType,
+    strictIntent,
+    broadIntent,
+    hasNegation,
+    canonicalIntent: strictIntent || broadIntent || null
+  };
+}
+
+function buildTreatmentMatchText(row = {}) {
+  return normalizeText([
+    row.name,
+    row.swedish,
+    row.classification_type,
+    row.description_en,
+    row.description_sv,
+    row.like_wise_terms,
+    row.like_wise_terms_swedish,
+    row.device_name,
+    row.device_name_swedish,
+    row.benefits_en,
+    row.benefits_sv
+  ].filter(Boolean).join(" "));
+}
+
+function computeLexicalScore(text, queryInfo, row = {}) {
+  const q = queryInfo.normalized;
+  if (!q) return 0;
+
+  const nameNorm = normalizeText(row.name || "");
+  const swedishNorm = normalizeText(row.swedish || "");
+
+  let score = 0;
+  if (nameNorm === q || swedishNorm === q) score = Math.max(score, 1);
+  else if (nameNorm.startsWith(q) || swedishNorm.startsWith(q)) score = Math.max(score, 0.9);
+  else if (includesPhrase(nameNorm, q) || includesPhrase(swedishNorm, q)) score = Math.max(score, 0.82);
+  else if (includesPhrase(text, q)) score = Math.max(score, 0.72);
+
+  const qTokens = q.split(/\s+/).filter(Boolean);
+  const textTokens = new Set(text.split(/\s+/).filter(Boolean));
+  const tokenOverlap = qTokens.length
+    ? qTokens.filter((t) => textTokens.has(t)).length / qTokens.length
+    : 0;
+  score = Math.max(score, tokenOverlap * 0.75);
+
+  const fuzzy = phraseMeaningSimilarity(q, nameNorm || text);
+  score = Math.max(score, fuzzy * 0.7);
+
+  return Math.min(score, 1);
+}
+
+function isRowInIntentCategory(text, row, queryInfo) {
+  const intent = queryInfo.strictIntent;
+  if (!intent) return true;
+
+  const synonyms = STRICT_INTENT_SYNONYMS[intent] || [];
+  const hit = synonyms.some((s) => includesPhrase(text, normalizeText(s)));
+  if (!hit) return false;
+
+  if (queryInfo.hasNegation && intent === "laser") return false;
+  return true;
+}
+
+function isRowExcludedByNegation(text, queryInfo) {
+  if (!queryInfo.hasNegation) return false;
+  return includesPhrase(text, "laser");
+}
+
+const TREATMENT_SEARCH_CACHE = new Map();
+const TREATMENT_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function hashString(value = "") {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = ((hash << 5) - hash) + value.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function getRowsSignature(rows = []) {
+  const ids = rows
+    .map((r) => String(r.treatment_id || ""))
+    .filter(Boolean)
+    .sort()
+    .join("|");
+
+  return `${rows.length}:${hashString(ids)}`;
+}
+
+function buildTreatmentCacheKey(queryInfo, rows, threshold) {
+  return [
+    "treatment",
+    queryInfo.normalized,
+    queryInfo.hasNegation ? "neg:1" : "neg:0",
+    `th:${Number(threshold || 0).toFixed(2)}`,
+    `sig:${getRowsSignature(rows)}`
+  ].join("::");
+}
+
+function getCachedTreatmentRankings(cacheKey) {
+  const entry = TREATMENT_SEARCH_CACHE.get(cacheKey);
+  if (!entry) return null;
+
+  if ((Date.now() - entry.ts) > TREATMENT_CACHE_TTL_MS) {
+    TREATMENT_SEARCH_CACHE.delete(cacheKey);
+    return null;
+  }
+
+  return entry.rankings;
+}
+
+function setCachedTreatmentRankings(cacheKey, rankings) {
+  TREATMENT_SEARCH_CACHE.set(cacheKey, {
+    ts: Date.now(),
+    rankings
+  });
+}
+
+function treatmentTieBreaker(a, b) {
+  if ((b.score ?? 0) !== (a.score ?? 0)) return (b.score ?? 0) - (a.score ?? 0);
+  if ((b.lexical_score ?? 0) !== (a.lexical_score ?? 0)) return (b.lexical_score ?? 0) - (a.lexical_score ?? 0);
+  if ((b.exact_match ?? 0) !== (a.exact_match ?? 0)) return (b.exact_match ?? 0) - (a.exact_match ?? 0);
+
+  const aName = normalizeText(a.name || a.swedish || "");
+  const bName = normalizeText(b.name || b.swedish || "");
+  return aName.localeCompare(bName);
+}
+
 // --------------------------------------
 // 4️⃣ Final boost logic (only based on name)
 // --------------------------------------
@@ -185,19 +427,123 @@ export const getTreatmentsAIResult = async (
 ) => {
   if (!search?.trim()) return rows;
 
-  const normalized = search.trim().toLowerCase();
+  const queryInfo = detectCanonicalIntent(search);
+  const cacheKey = buildTreatmentCacheKey(queryInfo, rows, threshold);
+  const cachedRankings = getCachedTreatmentRankings(cacheKey);
 
-  const scoreResults = await batchGPTSimilarity(rows, normalized);
+  if (cachedRankings?.length) {
+    const rowsById = new Map(rows.map((r) => [r.treatment_id, r]));
+    const cachedResolved = cachedRankings
+      .map((item) => {
+        const base = rowsById.get(item.treatment_id);
+        if (!base) return null;
+        return {
+          ...base,
+          score: item.score,
+          lexical_score: item.lexical_score,
+          semantic_score: item.semantic_score,
+          exact_match: item.exact_match,
+          is_fallback: item.is_fallback,
+          match_stage: item.match_stage
+        };
+      })
+      .filter(Boolean);
 
-  const scoreMap = new Map(scoreResults.map(r => [r.id, r.score]));
+    const translatedFromCache = cachedResolved.map((result) => ({
+      ...result,
+      name: language === "en" ? result.name : result.swedish,
+      benefits: language === "en" ? result.benefits_en : result.benefits_sv,
+      description: language === "en" ? result.description_en : result.description_sv
+    }));
 
-  const filtered = rows
-    .map(r => ({
+    return topN ? translatedFromCache.slice(0, topN) : translatedFromCache;
+  }
+
+  const prepared = rows.map((row) => {
+    const matchText = buildTreatmentMatchText(row);
+    const lexicalScore = computeLexicalScore(matchText, queryInfo, row);
+    const normalizedQuery = queryInfo.normalized;
+    const rowName = normalizeText(row.name || "");
+    const rowSwedish = normalizeText(row.swedish || "");
+    const exactMatch = (rowName === normalizedQuery || rowSwedish === normalizedQuery) ? 1 : 0;
+    return {
+      ...row,
+      _matchText: matchText,
+      _lexicalScore: lexicalScore,
+      _exactMatch: exactMatch
+    };
+  });
+
+  let guarded = prepared
+    .filter((row) => !isRowExcludedByNegation(row._matchText, queryInfo))
+    .filter((row) => isRowInIntentCategory(row._matchText, row, queryInfo));
+
+  // If strict intent has no guarded candidates, keep it strict and avoid cross-category leakage.
+  if (!guarded.length && queryInfo.intentType !== "strict_category") {
+    guarded = prepared.filter((row) => !isRowExcludedByNegation(row._matchText, queryInfo));
+  }
+
+  const gptCandidates =
+    queryInfo.intentType === "strict_category"
+      ? guarded.filter((r) => r._lexicalScore >= 0.45)
+      : guarded;
+
+  const scoreResults = gptCandidates.length
+    ? await batchGPTSimilarity(gptCandidates, queryInfo.normalized)
+    : [];
+
+  const scoreMap = new Map(scoreResults.map((r) => [r.id, r.score]));
+
+  const scored = guarded.map((r) => {
+    const gptScore = scoreMap.get(r.treatment_id) ?? 0;
+    const lexical = r._lexicalScore;
+    const finalScore = queryInfo.intentType === "strict_category"
+      ? (0.75 * lexical) + (0.25 * gptScore)
+      : (0.45 * lexical) + (0.55 * gptScore);
+
+    const exactCategoryHit = queryInfo.strictIntent && isRowInIntentCategory(r._matchText, r, queryInfo);
+
+    return {
       ...r,
-      score: scoreMap.get(r.treatment_id) ?? 0
+      lexical_score: lexical,
+      semantic_score: gptScore,
+      exact_match: r._exactMatch,
+      score: Math.min(finalScore + (exactCategoryHit ? 0.08 : 0), 1)
+    };
+  });
+
+  const primaryThreshold = queryInfo.intentType === "strict_category"
+    ? Math.max(0.55, threshold)
+    : Math.max(0.45, threshold);
+
+  const primary = scored
+    .filter((r) => r.score >= primaryThreshold || r._lexicalScore >= 0.78)
+    .map((r) => ({ ...r, is_fallback: false, match_stage: "primary" }))
+    .sort(treatmentTieBreaker);
+
+  // Fallback is only for broad/general intents and always appended after primary.
+  const fallback = (queryInfo.intentType === "strict_category" || primary.length > 0)
+    ? []
+    : scored
+      .filter((r) => r.score >= 0.32)
+      .sort(treatmentTieBreaker)
+      .slice(0, 8)
+      .map((r) => ({ ...r, is_fallback: true, match_stage: "fallback" }));
+
+  const filtered = [...primary, ...fallback];
+
+  setCachedTreatmentRankings(
+    cacheKey,
+    filtered.map((r) => ({
+      treatment_id: r.treatment_id,
+      score: r.score ?? 0,
+      lexical_score: r.lexical_score ?? 0,
+      semantic_score: r.semantic_score ?? 0,
+      exact_match: r.exact_match ?? 0,
+      is_fallback: Boolean(r.is_fallback),
+      match_stage: r.match_stage || "primary"
     }))
-    .filter(r => r.score >= threshold)
-    .sort((a, b) => b.score - a.score);
+  );
 
   const translated = filtered.map(result => ({
     ...result,
@@ -220,9 +566,8 @@ export const getSubTreatmentsAIResult = async (
 ) => {
   if (!search?.trim()) return rows;
 
-  console.log("search", search);
-
-  const normalizedSearch = search.trim().toLowerCase();
+  const queryInfo = detectCanonicalIntent(search);
+  const normalizedSearch = queryInfo.normalized;
 
   // ----- Step 1: GPT similarity -----
   const gptScoreResults = await batchGPTSimilaritySubTreatments(rows, normalizedSearch);
@@ -232,35 +577,44 @@ export const getSubTreatmentsAIResult = async (
 
   // ----- Step 2: Manual lexical match score -----
   const scoredRows = rows.map(r => {
-    const nameEn = (r.name || '').toLowerCase();
-    const treatmentEn = (r.treatment_name || '').toLowerCase();
+    const nameEn = normalizeText(r.name || "");
+    const treatmentEn = normalizeText(r.treatment_name || "");
+    const treatmentSv = normalizeText(r.treatment_swedish || "");
+    const text = normalizeText(`${nameEn} ${treatmentEn} ${treatmentSv}`);
 
-    let nameScore = 0;
+    const nameScore = computeLexicalScore(text, queryInfo, {
+      name: r.name,
+      swedish: r.swedish
+    });
+    const gptScore = gptScoreMap.get(r.sub_treatment_id) || 0;
 
-    if (nameEn === normalizedSearch || treatmentEn === normalizedSearch) {
-      nameScore = 1.0; // exact match
-    } else if (nameEn.startsWith(normalizedSearch) || treatmentEn.startsWith(normalizedSearch)) {
-      nameScore = 0.7; // prefix match
-    } else if (nameEn.includes(normalizedSearch) || treatmentEn.includes(normalizedSearch)) {
-      nameScore = 0.5; // contains
-    }
-
-    const gptScore = gptScoreMap.get(r.treatment_id) || 0;
+    const categoryHit = queryInfo.strictIntent
+      ? isRowInIntentCategory(text, r, queryInfo)
+      : true;
+    const negationExcluded = isRowExcludedByNegation(text, queryInfo);
 
     // ----- Step 3: Combine scores (weight: 60% GPT, 40% manual) -----
-    const final_score = 0.6 * gptScore + 0.4 * nameScore;
+    const final_score = queryInfo.intentType === "strict_category"
+      ? (0.7 * nameScore) + (0.3 * gptScore)
+      : (0.55 * gptScore) + (0.45 * nameScore);
 
     return {
       ...r,
       gpt_score: gptScore,
       name_score: nameScore,
-      final_score
+      final_score,
+      _categoryHit: categoryHit,
+      _negationExcluded: negationExcluded
     };
   });
 
   // ----- Step 4: Filter by threshold -----
   const filtered = scoredRows
-    .filter(r => r.final_score >= threshold)
+    .filter(r => !r._negationExcluded)
+    .filter(r => r._categoryHit)
+    .filter(r => queryInfo.intentType === "strict_category"
+      ? (r.final_score >= Math.max(0.52, threshold) || r.name_score >= 0.78)
+      : r.final_score >= Math.max(0.40, threshold))
     .sort((a, b) => b.final_score - a.final_score);
 
   // ----- Step 5: Translate if needed -----
@@ -1060,7 +1414,7 @@ ${JSON.stringify(rows.map(r => r.treatment_id))}
 
 async function runSubTreatmentSimilarityBatch(batch, searchQuery) {
   const list = batch.map(r => ({
-    id: r.treatment_id,
+    id: r.sub_treatment_id,
     text: `
 Sub Treatment Name: ${safeString(r.name)}
 Treatment Name: ${safeString(r.treatment_name)}
@@ -1107,7 +1461,7 @@ ITEM LIST:
 ${JSON.stringify(list)}
 
 ALLOWED IDs:
-${JSON.stringify(batch.map(r => r.treatment_id))}
+${JSON.stringify(batch.map(r => r.sub_treatment_id))}
 `;
 
   const res = await client.chat.completions.create({

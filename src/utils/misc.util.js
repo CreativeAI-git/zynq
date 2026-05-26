@@ -599,11 +599,39 @@ export const rankSimilarRows = async (rows, search, threshold = 0, topN = null) 
 // Common medical/brand words you don't want translated
 const SAFE_TERMS = [
     "Fotona", "Hydrafacial", "Lumenis", "Candela", "Cynosure", "Restylane",
-    "Juvederm", "Botox", "Belotero", "Dysport", "Allergan", "HIFU", "Laser", "Clinic"
+    "Juvederm", "Botox", "Belotero", "Dysport", "Allergan", "HIFU", "Laser", "Clinic",
+    "Morpheus8", "Clarity II", "ND:YAG", "Emsella", "Profhilo", "Dermapen", "PRP"
 ];
 
 function containsSafeTerm(text) {
     return SAFE_TERMS.some(term => text.toLowerCase().includes(term.toLowerCase()));
+}
+
+function protectSafeTerms(text) {
+    if (!text) return { protectedText: text, map: [] };
+
+    let protectedText = text;
+    const map = [];
+
+    SAFE_TERMS.forEach((term, idx) => {
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const token = `__SAFE_TERM_${idx}__`;
+        const re = new RegExp(`\\b${escaped}\\b`, "gi");
+        if (re.test(protectedText)) {
+            protectedText = protectedText.replace(re, token);
+            map.push({ token, term });
+        }
+    });
+
+    return { protectedText, map };
+}
+
+function restoreSafeTerms(text, map = []) {
+    let restored = text;
+    map.forEach(({ token, term }) => {
+        restored = restored.replace(new RegExp(token, "g"), term);
+    });
+    return restored;
 }
 
 export async function translator(question, targetLang = "en") {
@@ -625,14 +653,16 @@ export async function translator(question, targetLang = "en") {
 
         // 🌍 Step 3: Only translate if it’s Swedish or other non-English
         if (["sv", "da", "no", "de", "fr", "it", "es"].includes(detectedLang)) {
+            const { protectedText, map } = protectSafeTerms(question);
             const translateUrl = `https://translation.googleapis.com/language/translate/v2?key=${GOOGLE_TRANSLATE_KEY}`;
             const resp = await axios.post(translateUrl, {
-                q: question,
+                q: protectedText,
                 target: targetLang,
                 format: "text"
             });
 
-            const translated = resp.data.data.translations[0].translatedText;
+            const translatedRaw = resp.data.data.translations[0].translatedText;
+            const translated = restoreSafeTerms(translatedRaw, map);
             console.log(`Translated (${detectedLang} → ${targetLang}): '${question}' → '${translated}'`);
             return translated;
         }
