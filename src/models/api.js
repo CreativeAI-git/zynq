@@ -3510,9 +3510,112 @@ export const getRelationshipAwareSearchExpansion = async ({
             treatment_name: language === "en" ? row.treatment_name : (row.treatment_swedish || row.treatment_name)
         }));
 
+        // ---- Doctor relation expansion via treatment mappings ----
+        const relatedDoctorClinicRows = finalTreatmentIds.length > 0
+            ? await db.query(`
+                SELECT DISTINCT
+                    dt.doctor_id,
+                    dt.clinic_id
+                FROM tbl_doctor_treatments dt
+                INNER JOIN tbl_doctors d
+                    ON d.doctor_id = dt.doctor_id
+                    AND d.profile_status = 'VERIFIED'
+                INNER JOIN tbl_clinics c
+                    ON c.clinic_id = dt.clinic_id
+                    AND c.profile_status = 'VERIFIED'
+                WHERE dt.treatment_id IN (?)
+            `, [finalTreatmentIds])
+            : [];
+
+        const doctorIds = Array.from(new Set(relatedDoctorClinicRows.map((r) => r.doctor_id).filter(Boolean)));
+        const clinicIdsFromDoctorMap = Array.from(new Set(relatedDoctorClinicRows.map((r) => r.clinic_id).filter(Boolean)));
+
+        const relatedDoctors = doctorIds.length > 0
+            ? await db.query(`
+                SELECT
+                    d.doctor_id,
+                    d.name,
+                    d.last_name,
+                    d.specialization,
+                    d.profile_image,
+                    d.fee_per_session,
+                    dm.clinic_id,
+                    c.clinic_name,
+                    c.address AS clinic_address,
+                    ROUND(AVG(ar.rating), 2) AS avg_rating
+                FROM tbl_doctors d
+                INNER JOIN tbl_doctor_clinic_map dm
+                    ON dm.doctor_id = d.doctor_id
+                INNER JOIN tbl_clinics c
+                    ON c.clinic_id = dm.clinic_id
+                    AND c.profile_status = 'VERIFIED'
+                LEFT JOIN tbl_appointment_ratings ar
+                    ON ar.doctor_id = d.doctor_id
+                    AND ar.approval_status = 'APPROVED'
+                WHERE d.profile_status = 'VERIFIED'
+                  AND d.doctor_id IN (?)
+                GROUP BY d.doctor_id, dm.clinic_id
+            `, [doctorIds])
+            : [];
+
+        const enrichedDoctors = relatedDoctors.map((row) => ({
+            ...row,
+            relation_priority: 2,
+            relation_match_type: "direct_relation",
+            score: 0
+        }));
+
+        // ---- Clinic relation expansion via treatment/device mappings ----
+        const deviceSeedIdList = Array.from(deviceSeedIds);
+        const clinicIdsFromDeviceMap = deviceSeedIdList.length > 0
+            ? await db.query(`
+                SELECT DISTINCT cad.clinic_id
+                FROM tbl_clinic_aesthetic_devices cad
+                INNER JOIN tbl_treatment_devices td
+                    ON td.id = cad.aesthetic_devices_id
+                INNER JOIN tbl_clinics c
+                    ON c.clinic_id = cad.clinic_id
+                    AND c.profile_status = 'VERIFIED'
+                WHERE td.device_id IN (?)
+            `, [deviceSeedIdList])
+            : [];
+
+        const clinicIds = Array.from(new Set([
+            ...clinicIdsFromDoctorMap,
+            ...clinicIdsFromDeviceMap.map((r) => r.clinic_id).filter(Boolean)
+        ]));
+
+        const relatedClinics = clinicIds.length > 0
+            ? await db.query(`
+                SELECT
+                    c.clinic_id,
+                    c.clinic_name,
+                    c.address,
+                    c.clinic_logo,
+                    c.clinic_description,
+                    ROUND(AVG(ar.rating), 2) AS avg_rating
+                FROM tbl_clinics c
+                LEFT JOIN tbl_appointment_ratings ar
+                    ON ar.clinic_id = c.clinic_id
+                    AND ar.approval_status = 'APPROVED'
+                WHERE c.profile_status = 'VERIFIED'
+                  AND c.clinic_id IN (?)
+                GROUP BY c.clinic_id
+            `, [clinicIds])
+            : [];
+
+        const enrichedClinics = relatedClinics.map((row) => ({
+            ...row,
+            relation_priority: 2,
+            relation_match_type: "direct_relation",
+            score: 0
+        }));
+
         return {
             devices: enrichedDevices,
-            treatments: enrichedTreatments
+            treatments: enrichedTreatments,
+            doctors: enrichedDoctors,
+            clinics: enrichedClinics
         };
     } catch (error) {
         console.error("Database Error in getRelationshipAwareSearchExpansion:", error.message);
@@ -3676,6 +3779,52 @@ export const getSubTreatmentsBySearchOnly = async ({
     } catch (error) {
         console.error('Database Error in getTreatmentsBySearch:', error.message);
         throw new Error('Failed to fetch treatments.');
+    }
+};
+
+export const getSubTreatmentsByTreatmentIds = async ({
+    treatmentIds = [],
+    language = 'en',
+    limit = null,
+    page = null
+}) => {
+    try {
+        const ids = Array.isArray(treatmentIds) ? treatmentIds.filter(Boolean) : [];
+        if (!ids.length) return [];
+
+        let rows = await db.query(`
+            SELECT
+                stm.sub_treatment_id,
+                tts.treatment_id,
+                stm.name,
+                stm.swedish,
+                t.name AS treatment_name,
+                t.swedish AS treatment_swedish
+            FROM tbl_treatment_sub_treatments tts
+            INNER JOIN tbl_sub_treatment_master stm
+                ON stm.sub_treatment_id = tts.sub_treatment_id
+                AND stm.is_deleted = 0
+                AND stm.approval_status = 'APPROVED'
+            INNER JOIN tbl_treatments t
+                ON t.treatment_id = tts.treatment_id
+                AND t.is_deleted = 0
+                AND t.approval_status = 'APPROVED'
+            WHERE tts.treatment_id IN (?)
+        `, [ids]);
+
+        rows = rows.map((r) => ({
+            ...r,
+            name: language === "en" ? r.name : r.swedish,
+            treatment_name: language === "en" ? r.treatment_name : r.treatment_swedish,
+            relation_priority: 2,
+            relation_match_type: "direct_relation"
+        }));
+
+        rows = paginateRows(rows, limit, page);
+        return rows;
+    } catch (error) {
+        console.error("Database Error in getSubTreatmentsByTreatmentIds:", error.message);
+        return [];
     }
 };
 

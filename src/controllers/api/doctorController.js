@@ -572,13 +572,14 @@ export const search_home_entities = asyncHandler(async (req, res) => {
         console.log("Search Intent Ranking:", intentRanking);
 
         // 2️⃣ Run all searches (as you already do)
-        const [doctors, clinics, devices, treatments] = await Promise.all([
+        const [doctors, clinics, devices, treatments, subTreatments] = await Promise.all([
 
             userModels.getDoctorsByFirstNameSearchOnly({ search: normalized_search, page, limit }),
             userModels.getClinicsByNameSearchOnly({ search: normalized_search, page, limit }),
             userModels.getDevicesByNameSearchOnly({ search: normalized_search, page, limit }),
             // userModels.getProductsByNameSearchOnly({ search: normalized_search, page, limit }),
-            userModels.getTreatmentsBySearchOnly({ search: normalized_search, language, page, limit, actualSearch: search })
+            userModels.getTreatmentsBySearchOnly({ search: normalized_search, language, page, limit, actualSearch: search }),
+            userModels.getSubTreatmentsBySearchOnly({ search: normalized_search, language, page, limit, actualSearch: search })
         ]);
 
         // 2b) Relationship-aware graph expansion (device <-> treatment + mapped neighbors)
@@ -605,6 +606,21 @@ export const search_home_entities = asyncHandler(async (req, res) => {
             relatedDefaultPriority: 2
         });
 
+        const relatedSubTreatments = await userModels.getSubTreatmentsByTreatmentIds({
+            treatmentIds: mergedTreatments.map((t) => t?.treatment_id).filter(Boolean),
+            language,
+            limit: null,
+            page: null
+        });
+
+        const mergedSubTreatments = mergeGraphAwareResults(subTreatments, relatedSubTreatments, {
+            keySelector: (row) => row?.sub_treatment_id,
+            nameSelector: (row) => row?.name || row?.swedish || "",
+            scoreSelector: (row) => row?.final_score ?? row?.score ?? row?.name_score ?? 0,
+            primaryPriority: 1,
+            relatedDefaultPriority: 2
+        });
+
 
         // 3️⃣ Enrich images (same as your code)
         const enrichedDoctors = doctors.map(doctor => ({
@@ -617,17 +633,44 @@ export const search_home_entities = asyncHandler(async (req, res) => {
             clinic_logo: formatImagePath(clinic.clinic_logo, 'clinic/logo')
         }));
 
+        const relationDoctors = (relationExpansion.doctors || []).map((doctor) => ({
+            ...doctor,
+            profile_image: formatImagePath(doctor.profile_image, 'doctor/profile_images')
+        }));
+
+        const relationClinics = (relationExpansion.clinics || []).map((clinic) => ({
+            ...clinic,
+            clinic_logo: formatImagePath(clinic.clinic_logo, 'clinic/logo')
+        }));
+
+        const mergedDoctors = mergeGraphAwareResults(enrichedDoctors, relationDoctors, {
+            keySelector: (row) => `${row?.doctor_id || ""}:${row?.clinic_id || ""}`,
+            nameSelector: (row) => `${row?.name || ""} ${row?.last_name || ""}`.trim(),
+            scoreSelector: (row) => row?.final_score ?? row?.score ?? 0,
+            primaryPriority: 1,
+            relatedDefaultPriority: 2
+        });
+
+        const mergedClinics = mergeGraphAwareResults(enrichedClinics, relationClinics, {
+            keySelector: (row) => row?.clinic_id,
+            nameSelector: (row) => row?.clinic_name || "",
+            scoreSelector: (row) => row?.final_score ?? row?.score ?? 0,
+            primaryPriority: 1,
+            relatedDefaultPriority: 2
+        });
+
         let enrichedProducts = [];
 
         // 4️⃣ Reorder results based on AI ranking
         const rankedResults = {};
         for (const entity of intentRanking.ranking) {
             const key = entity.toLowerCase();
-            if (key === "doctor") rankedResults.doctors = enrichedDoctors;
-            if (key === "clinic") rankedResults.clinics = enrichedClinics;
+            if (key === "doctor") rankedResults.doctors = mergedDoctors;
+            if (key === "clinic") rankedResults.clinics = mergedClinics;
             if (key === "devices") rankedResults.devices = mergedDevices;
             // if (key === "product") rankedResults.products = enrichedProducts;
             if (key === "treatment") rankedResults.treatments = mergedTreatments;
+            if (key === "sub treatment") rankedResults.sub_treatments = mergedSubTreatments;
         }
 
         // 5️⃣ Return ranked response
@@ -1013,7 +1056,7 @@ export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res
 
 export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
-console.log("req.user",language,"language");
+console.log("req.user", req.user,language,"language");
     let { filters = {}, page, limit } = req.body || {};
 
     const search = filters.search?.trim() || "";
