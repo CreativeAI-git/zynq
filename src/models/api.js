@@ -224,6 +224,44 @@ export const delete_face_scan_result_by_id = async (face_scan_result_id) => {
     }
 };
 
+export const save_test_run_scan_result = async (payload) => {
+    try {
+        return await db.query(`INSERT INTO tbl_test_run_scan_results SET ?`, payload);
+    } catch (error) {
+        console.error("Database Error:", error.message);
+        throw new Error("Failed to save test run scan result.");
+    }
+};
+
+export const get_test_run_scan_results = async (scan_id = null) => {
+    try {
+        let query = `
+            SELECT 
+                test_run_scan_result_id,
+                request_status,
+                task_status,
+                output_count,
+                payload,
+                created_at,
+                updated_at
+            FROM tbl_test_run_scan_results
+        `;
+        const params = [];
+
+        if (scan_id) {
+            query += ` WHERE test_run_scan_result_id = ?`;
+            params.push(scan_id);
+        }
+
+        query += ` ORDER BY created_at DESC`;
+
+        return await db.query(query, params);
+    } catch (error) {
+        console.error("Database Error:", error.message);
+        throw new Error("Failed to fetch test run scan results.");
+    }
+};
+
 
 
 //======================================= Doctor =========================================
