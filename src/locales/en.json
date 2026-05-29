@@ -18,6 +18,8 @@
   "PROMPT_DATA_GET": "Prompt Data Retrived Successfully",
   "PROMPT_NOT_FOUND": "Prompt Not Found",
   "SCAN_DATA_ADDED": "Face Photo Data Added Successfully",
+  "TEST_RUN_SAVED_SUCCESSFULLY": "Test run scan result saved successfully",
+  "TEST_RUN_RESULTS_FETCHED_SUCCESSFULLY": "Test run scan results fetched successfully",
   "SCAN_HISTORY_DATA": "Face Photo Data Retrived Successfully",
   "INTERNAL_SERVER_ERROR": "internal server error",
   "CLINIC_IMPORT": "Centers imported successfully",
