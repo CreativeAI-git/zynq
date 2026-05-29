@@ -18,6 +18,8 @@
   "PROMPT_DATA_GET": "Promptdata hämtad framgångsrikt",
   "PROMPT_NOT_FOUND": "Prompt hittades inte",
   "SCAN_DATA_ADDED": "Ansiktsskanningsdata tillagd framgångsrikt",
+  "TEST_RUN_SAVED_SUCCESSFULLY": "Testkörningens skanningsresultat sparades",
+  "TEST_RUN_RESULTS_FETCHED_SUCCESSFULLY": "Testkörningens skanningsresultat hämtades",
   "SCAN_HISTORY_DATA": "Ansiktsskanningshistorik hämtad framgångsrikt",
   "INTERNAL_SERVER_ERROR": "Internt serverfel",
   "CLINIC_IMPORT": "Center importerade framgångsrikt",

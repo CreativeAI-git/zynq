@@ -10,6 +10,7 @@ import { validate } from '../middleware/validation.middleware.js';
 import * as authControllers from "../controllers/api/authController.js";
 import * as aiPromptControllers from "../controllers/api/aiPromptController.js";
 import * as faceScanControllers from "../controllers/api/faceScanController.js";
+import * as testRunControllers from "../controllers/api/testRunController.js";
 import * as doctorControllers from "../controllers/api/doctorController.js";
 import * as productControllers from "../controllers/api/productController.js";
 import * as clinicControllers from "../controllers/api/clinicController.js";
@@ -45,6 +46,7 @@ import { deleteSingleNotificationSchema } from '../validations/notification.vali
 import { getAllFAQCategories, getAllFAQs } from '../controllers/api/FAQController.js';
 import { getAllFAQSchema } from '../validations/faq.validation.js';
 import { addConsentSchema, openAIBackendEndpointSchema } from '../validations/legal.validation.js';
+import { getScanResultsSchema, saveScanSchema } from '../validations/testRun.validation.js';
 import { analyzeImageController, uploadImageToMemory } from '../services/aws_recognition.js';
 
 const router = express.Router();
@@ -84,6 +86,9 @@ router.post("/add-face-scan-result-device", upload.fields([
   { name: 'file', maxCount: 1 },
   { name: 'pdf', maxCount: 1 }
 ]), faceScanControllers.add_face_scan_result);
+router.post("/test-run/save", validate(saveScanSchema, "body"), testRunControllers.save_test_run_scan_result);
+router.get("/test-run/results", validate(getScanResultsSchema, "query"), testRunControllers.get_test_run_scan_results);
+// router.get("/v1/test-run/results", validate(getScanResultsSchema, "query"), testRunControllers.get_test_run_scan_results);
 router.get("/get-face-scan-history/:face_scan_id", authenticateUser, faceScanControllers.get_face_scan_history);
 router.get("/get-face-scan-history-device/:device_id", faceScanControllers.get_face_scan_history_device);
 router.get("/get-face-scan-history", authenticateUser, faceScanControllers.get_face_scan_history);
