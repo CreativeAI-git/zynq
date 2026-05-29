@@ -5,6 +5,9 @@ import { getTreatmentsAIResult, getDoctorsVectorResult, getDoctorsAIResult, getC
 import { name } from "ejs";
 import { getClinicMappedTreatments } from "./clinic.js";
 import { mergeGraphAwareResults } from "../utils/search_graph.util.js";
+import { parseSearchIntent, isTextAllowedForIntent, normalizeSearchText } from "../search/intent_taxonomy.js";
+import { restoreCanonicalBrandTerms } from "../search/protected_terms.js";
+import { enforceDeviceSectionCandidates } from "../search/typed_sections.js";
 
 //======================================= Auth =========================================
 
@@ -3241,8 +3244,9 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
 
     try {
         if (!search?.trim()) return [];
+        const queryInfo = parseSearchIntent(search);
 
-        // 1️⃣ Fetch doctors with embeddings + aggregated fields
+        // 1️⃣ Fetch mapped device entities
         let results = await db.query(`
         SELECT 
           d.id,
@@ -3250,18 +3254,38 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
           dt.name AS device_name,
           dt.swedish AS device_swedish,
           d.treatment_id,
-          t.name as treatment_name
+          t.name as treatment_name,
+          t.swedish as treatment_swedish,
+          t.classification_type
         FROM tbl_treatment_devices d
         LEFT JOIN tbl_treatments t ON d.treatment_id = t.treatment_id
         LEFT JOIN tbl_devices dt ON d.device_id = dt.device_id
         WHERE t.approval_status = 'APPROVED'
+          AND t.is_deleted = 0
+          AND dt.approval_status = 'APPROVED'
+          AND dt.is_deleted = 0
         GROUP BY d.id, d.treatment_id
       `);
 
 
-        // 2️⃣ Compute top similar rows using embeddings
+        // 2️⃣ Candidate generation: hard type/category guard BEFORE semantic ranking
+        const typedPre = enforceDeviceSectionCandidates(results, queryInfo, {
+            phase: "candidate_generation",
+            minRelationshipStrength: 0
+        });
+        results = typedPre.accepted;
+
+        // 3️⃣ Semantic/lexical ranking only on typed-safe candidates
         results = await getDevicesAIResult(results, search);
-        // 3️⃣ Apply pagination
+
+        // 4️⃣ Section-assignment validation (strict)
+        const typedFinal = enforceDeviceSectionCandidates(results, queryInfo, {
+            phase: "section_assignment",
+            minRelationshipStrength: queryInfo.canonicalIntent ? 0.66 : 0.62
+        });
+        results = typedFinal.accepted;
+
+        // 5️⃣ Apply pagination
         results = paginateRows(results, limit, page);
 
         return results;
@@ -3278,7 +3302,8 @@ export const getRelationshipAwareSearchExpansion = async ({
     seedTreatments = []
 }) => {
     try {
-        const normalized = (search || '').trim().toLowerCase();
+        const queryInfo = parseSearchIntent(search || "");
+        const normalized = normalizeSearchText(search || "").toLowerCase();
         if (!normalized) return { devices: [], treatments: [] };
 
         const like = `%${normalized}%`;
@@ -3431,6 +3456,7 @@ export const getRelationshipAwareSearchExpansion = async ({
 
         const exactTreatmentIdSet = new Set(exactTreatmentRows.map((r) => r.treatment_id));
         const exactDeviceMapIdSet = new Set(exactDeviceRows.map((r) => r.id));
+        const exactDeviceIdSet = new Set(exactDeviceRows.map((r) => r.device_id));
         const directTreatmentIdSet = new Set(relatedTreatmentRows.map((r) => r.treatment_id));
 
         const treatmentRelationMap = new Map();
@@ -3486,11 +3512,11 @@ export const getRelationshipAwareSearchExpansion = async ({
 
             return {
                 ...row,
-                name: language === "en" ? row.name : row.swedish,
+                name: restoreCanonicalBrandTerms(language === "en" ? row.name : row.swedish),
                 description: language === "en" ? row.description_en : row.description_sv,
                 benefits: language === "en" ? row.benefits_en : row.benefits_sv,
-                device_name: language === "en" ? row.device_name : (row.device_name_swedish || row.device_name),
-                like_wise_terms: language === "en" ? row.like_wise_terms : (row.like_wise_terms_swedish || row.like_wise_terms),
+                device_name: restoreCanonicalBrandTerms(language === "en" ? row.device_name : (row.device_name_swedish || row.device_name)),
+                like_wise_terms: restoreCanonicalBrandTerms(language === "en" ? row.like_wise_terms : (row.like_wise_terms_swedish || row.like_wise_terms)),
                 linked_sub_treatments: language === "en"
                     ? (sub?.sub_treatments_en || "")
                     : (sub?.sub_treatments_sv || sub?.sub_treatments_en || ""),
@@ -3502,13 +3528,22 @@ export const getRelationshipAwareSearchExpansion = async ({
             };
         });
 
-        const enrichedDevices = relatedDeviceRows.map((row) => ({
+        let enrichedDevices = relatedDeviceRows.map((row) => ({
             ...row,
             relation_priority: exactDeviceMapIdSet.has(row.id) ? 1 : 2,
             relation_match_type: exactDeviceMapIdSet.has(row.id) ? "exact_match" : "direct_relation",
-            device_name: language === "en" ? row.device_name : (row.device_swedish || row.device_name),
-            treatment_name: language === "en" ? row.treatment_name : (row.treatment_swedish || row.treatment_name)
+            device_name: restoreCanonicalBrandTerms(language === "en" ? row.device_name : (row.device_swedish || row.device_name)),
+            treatment_name: restoreCanonicalBrandTerms(language === "en" ? row.treatment_name : (row.treatment_swedish || row.treatment_name))
         }));
+
+        if (exactDeviceIdSet.size > 0) {
+            enrichedDevices = enrichedDevices.filter((row) => exactDeviceIdSet.has(row.device_id));
+        }
+
+        const typedDeviceGate = enforceDeviceSectionCandidates(enrichedDevices, queryInfo, {
+            minRelationshipStrength: 0.68
+        });
+        enrichedDevices = typedDeviceGate.accepted;
 
         // ---- Doctor relation expansion via treatment mappings ----
         const relatedDoctorClinicRows = finalTreatmentIds.length > 0
@@ -3615,7 +3650,10 @@ export const getRelationshipAwareSearchExpansion = async ({
             devices: enrichedDevices,
             treatments: enrichedTreatments,
             doctors: enrichedDoctors,
-            clinics: enrichedClinics
+            clinics: enrichedClinics,
+            debug: {
+                device_rejections: typedDeviceGate.rejected
+            }
         };
     } catch (error) {
         console.error("Database Error in getRelationshipAwareSearchExpansion:", error.message);
@@ -3629,10 +3667,12 @@ export const getTreatmentsBySearchOnly = async ({
     language = 'en',
     page = null,
     limit = null,
-    actualSearch
+    actualSearch,
+    debug = false
 }) => {
     try {
         if (!search?.trim()) return [];
+        const queryInfo = parseSearchIntent(actualSearch || search);
 
         // 1️⃣ Fetch all treatments that have embeddings
         let results = await db.query(`
@@ -3708,10 +3748,17 @@ export const getTreatmentsBySearchOnly = async ({
     `);
 
 
-        // 2️⃣ Primary treatment ranking
-        const primaryResults = await getTreatmentsAIResult(results, search, 0.4, null, language, actualSearch);
+        // 2️⃣ Stage A/C: lexical + strong semantic ranking inside intent guard
+        const primaryResults = await getTreatmentsAIResult(
+            results,
+            search,
+            0.4,
+            null,
+            language,
+            { debug }
+        );
 
-        // 3️⃣ Relationship-aware expansion (device -> treatment, synonym -> canonical treatment)
+        // 3️⃣ Stage B: structured relationship expansion
         const relationExpansion = await getRelationshipAwareSearchExpansion({
             search,
             language,
@@ -3719,9 +3766,28 @@ export const getTreatmentsBySearchOnly = async ({
             seedDevices: []
         });
 
-        // 4️⃣ Merge by strict priority:
-        // exact/primary > direct relation > synonym relation
-        results = mergeGraphAwareResults(primaryResults, relationExpansion.treatments, {
+        const relationGuarded = (relationExpansion?.treatments || []).filter((row) => {
+            const text = normalizeSearchText([
+                row.name,
+                row.swedish,
+                row.classification_type,
+                row.description_en,
+                row.description_sv,
+                row.like_wise_terms,
+                row.like_wise_terms_swedish,
+                row.device_name,
+                row.device_name_swedish
+            ].filter(Boolean).join(" "));
+            const intentAllowed = isTextAllowedForIntent(text, queryInfo);
+            if (!intentAllowed) return false;
+            if (queryInfo.canonicalIntent) {
+                return Number(row?.relation_priority || 99) <= 2;
+            }
+            return true;
+        });
+
+        // 4️⃣ Merge by strict priority: exact/primary > direct relation
+        results = mergeGraphAwareResults(primaryResults, relationGuarded, {
             keySelector: (row) => row?.treatment_id,
             nameSelector: (row) => row?.name || row?.swedish || "",
             scoreSelector: (row) => row?.score ?? row?.final_score ?? row?.lexical_score ?? 0,
@@ -3729,8 +3795,37 @@ export const getTreatmentsBySearchOnly = async ({
             relatedDefaultPriority: 2
         });
 
-        // 5️⃣ Apply pagination
+        // 5️⃣ Stage D fallback gate: keep weak fallback only when primary set is sparse
+        const primaryCount = primaryResults.filter((r) => !r?.is_fallback).length;
+        if (queryInfo.canonicalIntent && primaryCount > 0) {
+            results = results.filter((r) => !r?.is_fallback);
+        } else if (primaryCount >= 4) {
+            results = results.filter((r) => !r?.is_fallback);
+        }
+
+        // 6️⃣ Apply pagination
         results = paginateRows(results, limit, page);
+
+        if (debug) {
+            return {
+                items: results,
+                debug: {
+                    query: {
+                        raw: actualSearch || search,
+                        normalized: queryInfo.normalized,
+                        intent_bucket: queryInfo.intentBucket,
+                        intent_type: queryInfo.intentType,
+                        intent_confidence: queryInfo.intentConfidence,
+                        negation: queryInfo.hasNegation
+                    },
+                    stages: {
+                        stage_a_c_primary: primaryResults.length,
+                        stage_b_structured: relationGuarded.length,
+                        stage_d_fallback_enabled: !queryInfo.canonicalIntent && primaryCount < 4
+                    }
+                }
+            };
+        }
 
         return results;
     } catch (error) {
