@@ -3300,7 +3300,12 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
         SELECT 
           d.*,
           d.name AS device_name,
-          d.swedish AS device_swedish
+          d.swedish AS device_swedish,
+          td.treatment_id,
+          td.treatment_ids,
+          td.treatment_name,
+          td.treatment_swedish,
+          td.classification_type
         FROM tbl_devices d
         LEFT JOIN (
           SELECT
@@ -3354,6 +3359,32 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
         if (!results.length && typedPre.accepted.length > 0) {
             results = typedPre.accepted;
         }
+
+        results = results.map((row) => {
+            const treatmentNames = String(row.treatment_name || "")
+                .split(",")
+                .map((item) => item.trim())
+                .filter(Boolean);
+            const treatmentSwedish = String(row.treatment_swedish || "")
+                .split(",")
+                .map((item) => item.trim())
+                .filter(Boolean);
+            const treatmentIds = String(row.treatment_ids || "")
+                .split(",")
+                .map((item) => item.trim())
+                .filter(Boolean);
+
+            const associated_treatments = treatmentNames.map((name, index) => ({
+                name,
+                swedish: treatmentSwedish[index] || null,
+                treatment_id: treatmentIds[index] || row.treatment_id || null
+            }));
+
+            return {
+                ...row,
+                associated_treatments
+            };
+        });
 
         // 5️⃣ Apply pagination
         results = paginateRows(results, limit, page);
