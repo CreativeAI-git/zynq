@@ -82,6 +82,15 @@ function normalizeText(value = "") {
   return normalizeSearchText(value);
 }
 
+function collectSearchableRowText(row = {}) {
+  const noiseKeyPattern = /(^id$|_id$|^created_at$|^updated_at$|^deleted_at$|^is_deleted$|^approval_status$|^embeddings?$|^score$|_score$|^match_text$|^query_)/i;
+
+  return Object.entries(row)
+    .filter(([, value]) => typeof value === "string" && value.trim())
+    .filter(([key]) => !noiseKeyPattern.test(key))
+    .map(([, value]) => value);
+}
+
 function canonicalizeBrandText(value = "") {
   return restoreCanonicalBrandTerms(String(value || ""));
 }
@@ -1175,8 +1184,15 @@ function buildDeviceMatchText(row = {}) {
     row.device_swedish,
     row.treatment_name,
     row.treatment_swedish,
-    row.classification_type
-  ].filter(Boolean).join(" "));
+    row.classification_type,
+    row.category,
+    row.main_application,
+    row.manufacturer,
+    row.swedish_distributor
+  ]
+    .filter(Boolean)
+    .concat(collectSearchableRowText(row))
+    .join(" "));
 }
 
 function getQueryEntityTokens(queryInfo = {}) {
@@ -1197,8 +1213,16 @@ function hasDeviceEntityTokenMatch(row = {}, queryInfo = {}) {
 
   const deviceText = normalizeText([
     row.device_name,
-    row.device_swedish
-  ].filter(Boolean).join(" "));
+    row.device_swedish,
+    row.classification_type,
+    row.category,
+    row.main_application,
+    row.manufacturer,
+    row.swedish_distributor
+  ]
+    .filter(Boolean)
+    .concat(collectSearchableRowText(row))
+    .join(" "));
   const deviceTokens = deviceText.split(/\s+/).filter(Boolean);
 
   return entityTokens.some((queryToken) => deviceTokens.some((deviceToken) => (
@@ -1240,6 +1264,13 @@ export const getDevicesAIResult = async (
     const nameScore = computeDeviceNameScore(r.device_name, normalizedSearch);
     const swedishNameScore = computeDeviceNameScore(r.device_swedish, normalizedSearch);
     const combinedNameScore = Math.max(nameScore, swedishNameScore);
+    const metadataScore = Math.max(
+      computeDeviceNameScore(r.classification_type, normalizedSearch),
+      computeDeviceNameScore(r.category, normalizedSearch),
+      computeDeviceNameScore(r.main_application, normalizedSearch),
+      computeDeviceNameScore(r.manufacturer, normalizedSearch),
+      computeDeviceNameScore(r.swedish_distributor, normalizedSearch)
+    );
     const treatmentNameScore = Math.max(
       computeDeviceNameScore(r.treatment_name, normalizedSearch),
       computeDeviceNameScore(r.treatment_swedish, normalizedSearch)
@@ -1250,11 +1281,11 @@ export const getDevicesAIResult = async (
       ? Math.min(treatmentNameScore, 0.72)
       : Math.min(treatmentNameScore, 0.58);
 
-    const deviceCoreScore = (0.78 * combinedNameScore) + (0.12 * intentScore) + (0.10 * gptScore);
+    const deviceCoreScore = (0.58 * combinedNameScore) + (0.18 * metadataScore) + (0.14 * intentScore) + (0.10 * gptScore);
     const mappedTreatmentCoreScore = (0.58 * mappedTreatmentScore) + (0.12 * intentScore);
     const final_score = exactMatch
       ? 1
-      : Math.min(1, Math.max(deviceCoreScore, mappedTreatmentCoreScore));
+      : Math.min(1, Math.max(deviceCoreScore, mappedTreatmentCoreScore, metadataScore * 0.95));
 
     return {
       ...r,
@@ -1305,8 +1336,8 @@ export const getDevicesAIResult = async (
 
   if (Number.isFinite(adaptiveCap) && adaptiveCap > 0) {
     const profileCap = queryProfile?.typo_or_partial_intent
-      ? Math.min(adaptiveCap, 6)
-      : (queryProfile?.broad_intent ? Math.min(adaptiveCap, 10) : adaptiveCap);
+      ? Math.min(adaptiveCap, 8)
+      : adaptiveCap;
     filtered = filtered.slice(0, profileCap);
   }
 

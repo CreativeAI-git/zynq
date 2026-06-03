@@ -3284,38 +3284,48 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
     try {
         if (!search?.trim()) return [];
         const queryInfo = parseSearchIntent(search);
+        const collectSearchableText = (row = {}) => {
+            const noiseKeyPattern = /(^id$|_id$|^created_at$|^updated_at$|^deleted_at$|^is_deleted$|^approval_status$|^embeddings?$|^score$|_score$|^match_text$|^query_)/i;
+            return Object.entries(row)
+                .filter(([, value]) => typeof value === "string" && value.trim())
+                .filter(([key]) => !noiseKeyPattern.test(key))
+                .map(([, value]) => value)
+                .join(" ");
+        };
 
-        // 1️⃣ Fetch mapped device entities
+        // 1️⃣ Fetch the full approved device catalog and enrich it with linked treatments.
+        // This keeps laser searches grounded in the actual device master list instead of
+        // only the smaller treatment-mapping subset.
         let results = await db.query(`
         SELECT 
-          d.id,
-          dt.device_id,
-          dt.name AS device_name,
-          dt.swedish AS device_swedish,
-          d.treatment_id,
-          t.name as treatment_name,
-          t.swedish as treatment_swedish,
-          t.classification_type
-        FROM tbl_treatment_devices d
-        LEFT JOIN tbl_treatments t ON d.treatment_id = t.treatment_id
-        LEFT JOIN tbl_devices dt ON d.device_id = dt.device_id
-        WHERE t.approval_status = 'APPROVED'
-          AND t.is_deleted = 0
-          AND dt.approval_status = 'APPROVED'
-          AND dt.is_deleted = 0
-        GROUP BY d.id, d.treatment_id
+          d.*,
+          d.name AS device_name,
+          d.swedish AS device_swedish
+        FROM tbl_devices d
+        LEFT JOIN (
+          SELECT
+            td.device_id,
+            MIN(td.treatment_id) AS treatment_id,
+            GROUP_CONCAT(DISTINCT td.treatment_id ORDER BY td.treatment_id SEPARATOR ',') AS treatment_ids,
+            GROUP_CONCAT(DISTINCT t.name ORDER BY t.name SEPARATOR ',') AS treatment_name,
+            GROUP_CONCAT(DISTINCT t.swedish ORDER BY t.name SEPARATOR ',') AS treatment_swedish,
+            GROUP_CONCAT(DISTINCT t.classification_type ORDER BY t.classification_type SEPARATOR ',') AS classification_type
+          FROM tbl_treatment_devices td
+          LEFT JOIN tbl_treatments t
+            ON t.treatment_id = td.treatment_id
+            AND t.approval_status = 'APPROVED'
+            AND t.is_deleted = 0
+          GROUP BY td.device_id
+        ) td
+          ON td.device_id = d.device_id
+        WHERE d.approval_status = 'APPROVED'
+          AND d.is_deleted = 0
       `);
 
 
         const queryProfile = buildQueryProfile(
             search,
-            results.map((row) => [
-                row.device_name,
-                row.device_swedish,
-                row.treatment_name,
-                row.treatment_swedish,
-                row.classification_type
-            ].filter(Boolean).join(" "))
+            results.map((row) => collectSearchableText(row))
         );
 
         // 2️⃣ Candidate generation: hard type/category guard BEFORE semantic ranking
@@ -3329,7 +3339,7 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
         results = await getDevicesAIResult(results, search, 0.40, null, {
             queryProfile,
             adaptiveThreshold: computeAdaptiveThreshold(queryProfile, { base: 0.5, min: 0.42, max: 0.68 }),
-            adaptiveCap: computeAdaptiveCap(queryProfile, { min: 6, max: 16 })
+            adaptiveCap: computeAdaptiveCap(queryProfile, { min: 12, max: 60 })
         });
 
         // 4️⃣ Section-assignment validation (strict)
@@ -3338,6 +3348,12 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
             minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
         });
         results = typedFinal.accepted;
+
+        // Broad device queries should still surface the approved device catalog even
+        // if a strict ranking pass is too conservative for brand-only laser devices.
+        if (!results.length && typedPre.accepted.length > 0) {
+            results = typedPre.accepted;
+        }
 
         // 5️⃣ Apply pagination
         results = paginateRows(results, limit, page);
@@ -3359,6 +3375,15 @@ export const getRelationshipAwareSearchExpansion = async ({
         const queryInfo = parseSearchIntent(search || "");
         const normalized = normalizeSearchText(search || "").toLowerCase();
         if (!normalized) return { devices: [], treatments: [] };
+
+        const collectDelimitedIds = (value) => {
+            if (!value) return [];
+            if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
+            return String(value)
+                .split(",")
+                .map((item) => item.trim())
+                .filter(Boolean);
+        };
 
         const like = `%${normalized}%`;
         const queryProfile = buildQueryProfile(search, []);
@@ -3519,6 +3544,7 @@ export const getRelationshipAwareSearchExpansion = async ({
         const treatmentSeedIds = new Set([
             ...seedTreatments.map((t) => t?.treatment_id).filter(Boolean),
             ...seedDevices.map((d) => d?.treatment_id).filter(Boolean),
+            ...seedDevices.flatMap((d) => collectDelimitedIds(d?.treatment_ids)),
             ...exactDeviceRows.map((d) => d?.treatment_id).filter(Boolean),
             ...exactTreatmentRows.map((t) => t?.treatment_id).filter(Boolean),
             ...metadataSeedRows.map((t) => t?.treatment_id).filter(Boolean)
