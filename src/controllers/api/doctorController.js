@@ -14,6 +14,9 @@ import { formatBenefitsUnified, getTreatmentIDsByUserID } from "../../utils/misc
 import { openai } from "../../../app.js";
 import { translator } from "../../utils/misc.util.js";
 import { mergeGraphAwareResults } from "../../utils/search_graph.util.js";
+import { parseSearchIntent } from "../../search/intent_taxonomy.js";
+import { enforceDeviceSectionCandidates } from "../../search/typed_sections.js";
+import { containsProtectedTerm } from "../../search/protected_terms.js";
 
 
 /**
@@ -541,6 +544,7 @@ export const search_home_entities = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
     let { filters = {}, page, limit } = req.body || {};
+    const debugSearch = Boolean(filters?.debug_search);
 
     const search = filters.search?.trim() || "";
 
@@ -570,6 +574,7 @@ export const search_home_entities = asyncHandler(async (req, res) => {
             return handleSuccess(res, 200, "en", "No Data Found", []);
         }
         console.log("Search Intent Ranking:", intentRanking);
+        const queryInfo = parseSearchIntent(search || normalized_search);
 
         // 2️⃣ Run all searches (as you already do)
         const [doctors, clinics, devices, treatments, subTreatments] = await Promise.all([
@@ -581,16 +586,24 @@ export const search_home_entities = asyncHandler(async (req, res) => {
             userModels.getTreatmentsBySearchOnly({ search: normalized_search, language, page, limit, actualSearch: search }),
             userModels.getSubTreatmentsBySearchOnly({ search: normalized_search, language, page, limit, actualSearch: search })
         ]);
+        const typedPrimaryDevices = enforceDeviceSectionCandidates(devices, queryInfo, {
+            minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
+        });
 
         // 2b) Relationship-aware graph expansion (device <-> treatment + mapped neighbors)
         const relationExpansion = await userModels.getRelationshipAwareSearchExpansion({
             search: normalized_search,
             language,
-            seedDevices: devices,
+            seedDevices: typedPrimaryDevices.accepted,
             seedTreatments: treatments
         });
 
-        const mergedDevices = mergeGraphAwareResults(devices, relationExpansion.devices, {
+        const typedRelationDevices = enforceDeviceSectionCandidates(relationExpansion.devices || [], queryInfo, {
+            minRelationshipStrength: 0.68
+        });
+
+        // Relationship expansion enriches services/treatments, not device section.
+        const mergedDevices = mergeGraphAwareResults(typedPrimaryDevices.accepted, [], {
             keySelector: (row) => row?.id || `${row?.device_id || ""}:${row?.treatment_id || ""}`,
             nameSelector: (row) => row?.device_name || "",
             scoreSelector: (row) => row?.final_score ?? row?.score ?? 0,
@@ -661,16 +674,76 @@ export const search_home_entities = asyncHandler(async (req, res) => {
 
         let enrichedProducts = [];
 
+        const annotateSection = (rows = [], section = "") => rows.map((row) => ({
+            ...row,
+            _debug_search: debugSearch ? {
+                entity_type: row.entity_type || (section === "devices" ? "device" : (section.includes("treatment") ? "service" : section)),
+                category: row.canonical_category || null,
+                intent: queryInfo.intentBucket || null,
+                section_assigned: section,
+                section_assignment_reason: row.section_assignment_reason || (section === "devices" ? "typed_device_gate" : "service_pipeline"),
+                why_included: row.match_stage || row.relation_match_type || "ranked",
+                rejection_reason: row.rejection_reason || null,
+                fallback_stage: row.is_fallback ? "fallback" : "primary",
+                semantic_score: row.semantic_score ?? row.gpt_score ?? 0,
+                relationship_source: row.relationship_source || row.relation_match_type || "primary",
+                protected_term_flag: containsProtectedTerm([
+                    row.device_name,
+                    row.name,
+                    row.treatment_name,
+                    row.like_wise_terms
+                ].filter(Boolean).join(" ")),
+                negation_flag: Boolean(queryInfo.hasNegation),
+                typed_filter_passed: row.typed_filter_passed ?? true,
+                semantic_rejected: row.semantic_rejected ?? false
+            } : undefined
+        }));
+
         // 4️⃣ Reorder results based on AI ranking
         const rankedResults = {};
         for (const entity of intentRanking.ranking) {
             const key = entity.toLowerCase();
-            if (key === "doctor") rankedResults.doctors = mergedDoctors;
-            if (key === "clinic") rankedResults.clinics = mergedClinics;
-            if (key === "devices") rankedResults.devices = mergedDevices;
+            if (key === "doctor") rankedResults.doctors = annotateSection(mergedDoctors, "doctors");
+            if (key === "clinic") rankedResults.clinics = annotateSection(mergedClinics, "clinics");
+            if (key === "devices") rankedResults.devices = annotateSection(mergedDevices, "devices");
             // if (key === "product") rankedResults.products = enrichedProducts;
-            if (key === "treatment") rankedResults.treatments = mergedTreatments;
-            if (key === "sub treatment") rankedResults.sub_treatments = mergedSubTreatments;
+            if (key === "treatment") rankedResults.treatments = annotateSection(mergedTreatments, "treatments");
+            if (key === "sub treatment") rankedResults.sub_treatments = annotateSection(mergedSubTreatments, "sub_treatments");
+        }
+
+        if (debugSearch) {
+            rankedResults.debug = {
+                query: {
+                    raw: search,
+                    normalized: queryInfo.normalized,
+                    intent_bucket: queryInfo.intentBucket,
+                    intent_type: queryInfo.intentType
+                },
+                devices: {
+                    primary_candidates: devices.length,
+                    primary_accepted: typedPrimaryDevices.accepted.length,
+                    primary_rejected: typedPrimaryDevices.rejected.length,
+                    relation_candidates: (relationExpansion.devices || []).length,
+                    relation_accepted: typedRelationDevices.accepted.length,
+                    relation_rejected: typedRelationDevices.rejected.length,
+                    rejection_samples: [
+                        ...typedPrimaryDevices.rejected,
+                        ...typedRelationDevices.rejected,
+                        ...((relationExpansion.debug?.device_rejections) || [])
+                    ].slice(0, 50).map((row) => ({
+                        id: row.id,
+                        device_id: row.device_id,
+                        device_name: row.device_name,
+                        entity_type: row.entity_type,
+                        relationship_source: row.relationship_source,
+                        relationship_strength: row.relationship_strength,
+                        typed_filter_passed: row.typed_filter_passed,
+                        semantic_rejected: row.semantic_rejected,
+                        section_assignment_reason: row.section_assignment_reason,
+                        rejection_reason: row.rejection_reason
+                    }))
+                }
+            };
         }
 
         // 5️⃣ Return ranked response
@@ -1054,10 +1127,11 @@ export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res
     }
 });
 
+
 export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
-console.log("req.user", req.user,language,"language");
     let { filters = {}, page, limit } = req.body || {};
+    const debugSearch = Boolean(filters?.debug_search);
 
     const search = filters.search?.trim() || "";
 
@@ -1082,22 +1156,73 @@ console.log("req.user", req.user,language,"language");
         }
 
 
-        // 2️⃣ Run all searches (as you already do)
-        const [treatments] = await Promise.all([
+        // 2️⃣ Run all searches
+        const queryInfo = parseSearchIntent(search || normalized_search);
+        console.log("[TREATMENT API DEBUG] queryInfo:", queryInfo);
 
-            userModels.getTreatmentsBySearchOnly({ search: normalized_search, language, page, limit, actualSearch: search })
+        const [devices, rawTreatments] = await Promise.all([
+            userModels.getDevicesByNameSearchOnly({ search: normalized_search, page, limit }),
+            userModels.getTreatmentsBySearchOnly({
+                search: normalized_search,
+                language,
+                page,
+                limit,
+                actualSearch: search,
+                debug: debugSearch
+            })
         ]);
 
+        console.log("[TREATMENT API DEBUG] raw devices fetched length:", devices?.length);
 
+        const typedPrimaryDevices = enforceDeviceSectionCandidates(devices, queryInfo, {
+            minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
+        });
+
+        console.log("[TREATMENT API DEBUG] typedPrimaryDevices accepted length:", typedPrimaryDevices?.accepted?.length);
+
+        const treatmentsArray = (debugSearch && rawTreatments && typeof rawTreatments === "object" && Array.isArray(rawTreatments.items)) 
+            ? rawTreatments.items 
+            : rawTreatments;
+
+        console.log("[TREATMENT API DEBUG] treatmentsArray length:", treatmentsArray?.length);
+
+        const relationExpansion = await userModels.getRelationshipAwareSearchExpansion({
+            search: normalized_search,
+            language,
+            seedDevices: typedPrimaryDevices.accepted,
+            seedTreatments: treatmentsArray
+        });
+
+        console.log("[TREATMENT API DEBUG] relationExpansion.treatments length:", relationExpansion?.treatments?.length);
+
+        const mergedTreatments = mergeGraphAwareResults(treatmentsArray, relationExpansion.treatments, {
+            keySelector: (row) => row?.treatment_id,
+            nameSelector: (row) => row?.name || row?.swedish || "",
+            scoreSelector: (row) => row?.score ?? row?.final_score ?? row?.lexical_score ?? 0,
+            primaryPriority: 1,
+            relatedDefaultPriority: 2
+        });
+
+        console.log("[TREATMENT API DEBUG] mergedTreatments length:", mergedTreatments?.length);
 
         // 5️⃣ Return ranked response
-        return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', treatments);
+        if (debugSearch && rawTreatments && typeof rawTreatments === "object" && Array.isArray(rawTreatments.items)) {
+            return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', {
+                results: mergedTreatments,
+                debug: rawTreatments.debug || {}
+            });
+        }
+
+        return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', mergedTreatments);
 
     } catch (error) {
         console.error("Search Home Error:", error);
         return handleError(res, 500, language, "INTERNAL_SERVER_ERROR");
     }
 });
+
+
+
 
 export const getSubtreatmentsBySearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
@@ -1129,16 +1254,51 @@ export const getSubtreatmentsBySearchOnlyController = asyncHandler(async (req, r
         }
 
 
-        // 2️⃣ Run all searches (as you already do)
-        const [subtreatments] = await Promise.all([
+        // 2️⃣ Run all searches
+        const queryInfo = parseSearchIntent(search || normalized_search);
 
+        const [devices, treatments, subtreatments] = await Promise.all([
+            userModels.getDevicesByNameSearchOnly({ search: normalized_search, page, limit }),
+            userModels.getTreatmentsBySearchOnly({ search: normalized_search, language, page, limit, actualSearch: search }),
             userModels.getSubTreatmentsBySearchOnly({ search: normalized_search, language, page, limit, actualSearch: search })
         ]);
 
+        const typedPrimaryDevices = enforceDeviceSectionCandidates(devices, queryInfo, {
+            minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
+        });
 
+        const relationExpansion = await userModels.getRelationshipAwareSearchExpansion({
+            search: normalized_search,
+            language,
+            seedDevices: typedPrimaryDevices.accepted,
+            seedTreatments: treatments
+        });
+
+        const mergedTreatments = mergeGraphAwareResults(treatments, relationExpansion.treatments, {
+            keySelector: (row) => row?.treatment_id,
+            nameSelector: (row) => row?.name || row?.swedish || "",
+            scoreSelector: (row) => row?.score ?? row?.final_score ?? row?.lexical_score ?? 0,
+            primaryPriority: 1,
+            relatedDefaultPriority: 2
+        });
+
+        const relatedSubTreatments = await userModels.getSubTreatmentsByTreatmentIds({
+            treatmentIds: mergedTreatments.map((t) => t?.treatment_id).filter(Boolean),
+            language,
+            limit: null,
+            page: null
+        });
+
+        const mergedSubTreatments = mergeGraphAwareResults(subtreatments, relatedSubTreatments, {
+            keySelector: (row) => row?.sub_treatment_id,
+            nameSelector: (row) => row?.name || row?.swedish || "",
+            scoreSelector: (row) => row?.final_score ?? row?.score ?? row?.name_score ?? 0,
+            primaryPriority: 1,
+            relatedDefaultPriority: 2
+        });
 
         // 5️⃣ Return ranked response
-        return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', subtreatments);
+        return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', mergedSubTreatments);
 
     } catch (error) {
         console.error("Search Home Error:", error);

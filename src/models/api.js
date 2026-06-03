@@ -4,10 +4,11 @@ import { isEmpty } from "../utils/user_helper.js";
 import { getTreatmentsAIResult, getDoctorsVectorResult, getDoctorsAIResult, getClinicsAIResult, getDevicesAIResult, getSubTreatmentsAIResult } from "../utils/global_search.js"
 import { name } from "ejs";
 import { getClinicMappedTreatments } from "./clinic.js";
-import { mergeGraphAwareResults } from "../utils/search_graph.util.js";
+import { buildGraphRelationMeta, getGraphExpansionThreshold, mergeGraphAwareResults } from "../utils/search_graph.util.js";
 import { parseSearchIntent, isTextAllowedForIntent, normalizeSearchText } from "../search/intent_taxonomy.js";
 import { restoreCanonicalBrandTerms } from "../search/protected_terms.js";
 import { enforceDeviceSectionCandidates } from "../search/typed_sections.js";
+import { buildQueryProfile, computeAdaptiveCap, computeAdaptiveThreshold } from "../search/query_profile.js";
 
 //======================================= Auth =========================================
 
@@ -3306,6 +3307,17 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
       `);
 
 
+        const queryProfile = buildQueryProfile(
+            search,
+            results.map((row) => [
+                row.device_name,
+                row.device_swedish,
+                row.treatment_name,
+                row.treatment_swedish,
+                row.classification_type
+            ].filter(Boolean).join(" "))
+        );
+
         // 2️⃣ Candidate generation: hard type/category guard BEFORE semantic ranking
         const typedPre = enforceDeviceSectionCandidates(results, queryInfo, {
             phase: "candidate_generation",
@@ -3314,12 +3326,16 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
         results = typedPre.accepted;
 
         // 3️⃣ Semantic/lexical ranking only on typed-safe candidates
-        results = await getDevicesAIResult(results, search);
+        results = await getDevicesAIResult(results, search, 0.40, null, {
+            queryProfile,
+            adaptiveThreshold: computeAdaptiveThreshold(queryProfile, { base: 0.5, min: 0.42, max: 0.68 }),
+            adaptiveCap: computeAdaptiveCap(queryProfile, { min: 6, max: 16 })
+        });
 
         // 4️⃣ Section-assignment validation (strict)
         const typedFinal = enforceDeviceSectionCandidates(results, queryInfo, {
             phase: "section_assignment",
-            minRelationshipStrength: queryInfo.canonicalIntent ? 0.66 : 0.62
+            minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
         });
         results = typedFinal.accepted;
 
@@ -3345,6 +3361,8 @@ export const getRelationshipAwareSearchExpansion = async ({
         if (!normalized) return { devices: [], treatments: [] };
 
         const like = `%${normalized}%`;
+        const queryProfile = buildQueryProfile(search, []);
+        const graphThreshold = getGraphExpansionThreshold(queryProfile);
 
         const exactDeviceRows = await db.query(`
             SELECT DISTINCT
@@ -3396,6 +3414,103 @@ export const getRelationshipAwareSearchExpansion = async ({
               )
         `, [normalized, normalized, like, like, normalized, normalized, like, like]);
 
+        const metadataTreatmentRows = await db.query(`
+            SELECT DISTINCT
+                tc.treatment_id,
+                'linked_concern' AS relationship_level,
+                'concern_relation' AS relationship_source,
+                CONCAT_WS(' ', c.name, c.swedish) AS relationship_text
+            FROM tbl_treatment_concerns tc
+            INNER JOIN tbl_concerns c
+                ON c.concern_id = tc.concern_id
+                AND c.is_deleted = 0
+                AND c.approval_status = 'APPROVED'
+            INNER JOIN tbl_treatments t
+                ON t.treatment_id = tc.treatment_id
+                AND t.is_deleted = 0
+                AND t.approval_status = 'APPROVED'
+            WHERE LOWER(IFNULL(c.name, '')) = ?
+               OR LOWER(IFNULL(c.swedish, '')) = ?
+               OR LOWER(IFNULL(c.name, '')) LIKE ?
+               OR LOWER(IFNULL(c.swedish, '')) LIKE ?
+
+            UNION
+
+            SELECT DISTINCT
+                ttb.treatment_id,
+                'linked_metadata' AS relationship_level,
+                'benefit_relation' AS relationship_source,
+                CONCAT_WS(' ', b.name, b.swedish) AS relationship_text
+            FROM tbl_treatment_benefits ttb
+            INNER JOIN tbl_benefits b
+                ON b.benefit_id = ttb.benefit_id
+                AND b.is_deleted = 0
+                AND b.approval_status = 'APPROVED'
+            INNER JOIN tbl_treatments t
+                ON t.treatment_id = ttb.treatment_id
+                AND t.is_deleted = 0
+                AND t.approval_status = 'APPROVED'
+            WHERE LOWER(IFNULL(b.name, '')) = ?
+               OR LOWER(IFNULL(b.swedish, '')) = ?
+               OR LOWER(IFNULL(b.name, '')) LIKE ?
+               OR LOWER(IFNULL(b.swedish, '')) LIKE ?
+
+            UNION
+
+            SELECT DISTINCT
+                tts.treatment_id,
+                'linked_service' AS relationship_level,
+                'sub_treatment_relation' AS relationship_source,
+                CONCAT_WS(' ', stm.name, stm.swedish) AS relationship_text
+            FROM tbl_treatment_sub_treatments tts
+            INNER JOIN tbl_sub_treatment_master stm
+                ON stm.sub_treatment_id = tts.sub_treatment_id
+                AND stm.is_deleted = 0
+                AND stm.approval_status = 'APPROVED'
+            INNER JOIN tbl_treatments t
+                ON t.treatment_id = tts.treatment_id
+                AND t.is_deleted = 0
+                AND t.approval_status = 'APPROVED'
+            WHERE LOWER(IFNULL(stm.name, '')) = ?
+               OR LOWER(IFNULL(stm.swedish, '')) = ?
+               OR LOWER(IFNULL(stm.name, '')) LIKE ?
+               OR LOWER(IFNULL(stm.swedish, '')) LIKE ?
+
+            UNION
+
+            SELECT DISTINCT
+                t.treatment_id,
+                'linked_metadata' AS relationship_level,
+                'treatment_metadata_relation' AS relationship_source,
+                CONCAT_WS(' ', t.classification_type, t.description_en, t.description_sv) AS relationship_text
+            FROM tbl_treatments t
+            WHERE t.is_deleted = 0
+              AND t.approval_status = 'APPROVED'
+              AND (
+                LOWER(IFNULL(t.classification_type, '')) = ?
+                OR LOWER(IFNULL(t.description_en, '')) LIKE ?
+                OR LOWER(IFNULL(t.description_sv, '')) LIKE ?
+              )
+        `, [
+            normalized, normalized, like, like,
+            normalized, normalized, like, like,
+            normalized, normalized, like, like,
+            normalized, like, like
+        ]);
+
+        const metadataSeedRows = metadataTreatmentRows
+            .map((row) => ({
+                ...row,
+                ...buildGraphRelationMeta({
+                    level: row.relationship_level,
+                    relationSource: row.relationship_source,
+                    relationText: row.relationship_text,
+                    query: normalized,
+                    queryProfile
+                })
+            }))
+            .filter((row) => row.relationship_strength >= graphThreshold);
+
         const deviceSeedIds = new Set([
             ...seedDevices.map((d) => d?.device_id).filter(Boolean),
             ...exactDeviceRows.map((d) => d?.device_id).filter(Boolean)
@@ -3405,7 +3520,8 @@ export const getRelationshipAwareSearchExpansion = async ({
             ...seedTreatments.map((t) => t?.treatment_id).filter(Boolean),
             ...seedDevices.map((d) => d?.treatment_id).filter(Boolean),
             ...exactDeviceRows.map((d) => d?.treatment_id).filter(Boolean),
-            ...exactTreatmentRows.map((t) => t?.treatment_id).filter(Boolean)
+            ...exactTreatmentRows.map((t) => t?.treatment_id).filter(Boolean),
+            ...metadataSeedRows.map((t) => t?.treatment_id).filter(Boolean)
         ]);
 
         let relatedTreatmentRows = [];
@@ -3496,15 +3612,50 @@ export const getRelationshipAwareSearchExpansion = async ({
         const exactDeviceMapIdSet = new Set(exactDeviceRows.map((r) => r.id));
         const exactDeviceIdSet = new Set(exactDeviceRows.map((r) => r.device_id));
         const directTreatmentIdSet = new Set(relatedTreatmentRows.map((r) => r.treatment_id));
+        const metadataRelationMap = new Map();
+        metadataSeedRows.forEach((row) => {
+            const existing = metadataRelationMap.get(row.treatment_id);
+            if (!existing || row.relationship_strength > existing.relationship_strength) {
+                metadataRelationMap.set(row.treatment_id, row);
+            }
+        });
 
         const treatmentRelationMap = new Map();
         treatmentDetails.forEach((row) => {
             if (exactTreatmentIdSet.has(row.treatment_id)) {
-                treatmentRelationMap.set(row.treatment_id, { priority: 1, type: "exact_match" });
+                treatmentRelationMap.set(row.treatment_id, {
+                    priority: 1,
+                    type: "exact_match",
+                    source: "direct_entity",
+                    strength: 1,
+                    queryRelevance: 1
+                });
             } else if (directTreatmentIdSet.has(row.treatment_id)) {
-                treatmentRelationMap.set(row.treatment_id, { priority: 2, type: "direct_relation" });
+                treatmentRelationMap.set(row.treatment_id, {
+                    priority: 2,
+                    type: "direct_relation",
+                    source: "linked_device",
+                    strength: 0.86,
+                    queryRelevance: 1
+                });
+            } else if (metadataRelationMap.has(row.treatment_id)) {
+                const relation = metadataRelationMap.get(row.treatment_id);
+                treatmentRelationMap.set(row.treatment_id, {
+                    priority: relation.relation_priority,
+                    type: relation.relation_match_type,
+                    source: relation.relationship_source,
+                    level: relation.relationship_level,
+                    strength: relation.relationship_strength,
+                    queryRelevance: relation.query_relevance
+                });
             } else {
-                treatmentRelationMap.set(row.treatment_id, { priority: 3, type: "synonym_relation" });
+                treatmentRelationMap.set(row.treatment_id, {
+                    priority: 3,
+                    type: "synonym_relation",
+                    source: "linked_metadata",
+                    strength: 0.62,
+                    queryRelevance: 0.62
+                });
             }
         });
 
@@ -3544,7 +3695,13 @@ export const getRelationshipAwareSearchExpansion = async ({
         const concernMap = new Map(concerns.map((r) => [r.treatment_id, r]));
 
         const enrichedTreatments = treatmentDetails.map((row) => {
-            const relation = treatmentRelationMap.get(row.treatment_id) || { priority: 3, type: "synonym_relation" };
+            const relation = treatmentRelationMap.get(row.treatment_id) || {
+                priority: 3,
+                type: "synonym_relation",
+                source: "linked_metadata",
+                strength: 0.62,
+                queryRelevance: 0.62
+            };
             const sub = subMap.get(row.treatment_id);
             const concern = concernMap.get(row.treatment_id);
 
@@ -3562,7 +3719,11 @@ export const getRelationshipAwareSearchExpansion = async ({
                     ? (concern?.concerns_en || "")
                     : (concern?.concerns_sv || concern?.concerns_en || ""),
                 relation_priority: relation.priority,
-                relation_match_type: relation.type
+                relation_match_type: relation.type,
+                relationship_source: relation.source,
+                relationship_level: relation.level || relation.source,
+                relationship_strength: relation.strength,
+                query_relevance: relation.queryRelevance
             };
         });
 
@@ -3690,6 +3851,9 @@ export const getRelationshipAwareSearchExpansion = async ({
             doctors: enrichedDoctors,
             clinics: enrichedClinics,
             debug: {
+                graph_threshold: graphThreshold,
+                metadata_seed_candidates: metadataTreatmentRows.length,
+                metadata_seed_accepted: metadataSeedRows.length,
                 device_rejections: typedDeviceGate.rejected
             }
         };
@@ -3785,6 +3949,20 @@ export const getTreatmentsBySearchOnly = async ({
       ORDER BY t.treatment_id
     `);
 
+        const queryProfile = buildQueryProfile(
+            actualSearch || search,
+            results.map((row) => [
+                row.name,
+                row.swedish,
+                row.classification_type,
+                row.description_en,
+                row.description_sv,
+                row.like_wise_terms,
+                row.like_wise_terms_swedish,
+                row.device_name,
+                row.device_name_swedish
+            ].filter(Boolean).join(" "))
+        );
 
         // 2️⃣ Stage A/C: lexical + strong semantic ranking inside intent guard
         const primaryResults = await getTreatmentsAIResult(
@@ -3793,7 +3971,12 @@ export const getTreatmentsBySearchOnly = async ({
             0.4,
             null,
             language,
-            { debug }
+            {
+                debug,
+                queryProfile,
+                adaptiveThreshold: computeAdaptiveThreshold(queryProfile, { base: 0.55, min: 0.45, max: 0.72 }),
+                adaptiveCap: computeAdaptiveCap(queryProfile, { min: 12, max: 36 })
+            }
         );
 
         // 3️⃣ Stage B: structured relationship expansion
@@ -3860,7 +4043,8 @@ export const getTreatmentsBySearchOnly = async ({
                         stage_a_c_primary: primaryResults.length,
                         stage_b_structured: relationGuarded.length,
                         stage_d_fallback_enabled: !queryInfo.canonicalIntent && primaryCount < 4
-                    }
+                    },
+                    graph: relationExpansion?.debug || {}
                 }
             };
         }

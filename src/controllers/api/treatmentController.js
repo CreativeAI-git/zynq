@@ -63,7 +63,14 @@ import {
     insertTreatmentLikeWiseTermsModel,
     getBenefitsByIdsModel,
     getTreatmentBenefitsModel,
-    getTreatmentLikeWiseTermsModel
+    getTreatmentLikeWiseTermsModel,
+    checkExistingTreatmentByNameModel,
+    checkExistingSubTreatmentByNameModel,
+    checkExistingSubTreatmentMasterByNameModel,
+    checkExistingConcernByNameModel,
+    checkExistingLikeWiseTermsByNameModel,
+    checkExistingDeviceByNameModel,
+    checkExistingBenefitByNameModel
 } from "../../models/admin.js";
 import { getTreatmentsByConcernId } from "../../models/api.js";
 import { NOTIFICATION_MESSAGES, sendNotification } from "../../services/notifications.service.js";
@@ -125,6 +132,15 @@ export const addEditTreatment = asyncHandler(async (req, res) => {
     // Convert arrays → comma-separated for DB fields
     if (Array.isArray(dbData.device_name)) dbData.device_name = dbData.device_name.join(',');
     if (Array.isArray(dbData.like_wise_terms)) dbData.like_wise_terms = dbData.like_wise_terms.join(',');
+
+    const [existingTreatmentByName] = await checkExistingTreatmentByNameModel(
+        dbData.name,
+        dbData.swedish,
+        treatment_id || null
+    );
+    if (existingTreatmentByName) {
+        return handleError(res, 409, language, "TREATMENT_ALREADY_EXISTS");
+    }
 
     // ✳️ EDIT FLOW
     if (treatment_id) {
@@ -261,6 +277,16 @@ export const addEditSubtreatment = asyncHandler(async (req, res) => {
 
     let newSubTreatmentId = sub_treatment_id;
 
+    const [existingSubTreatmentByName] = await checkExistingSubTreatmentByNameModel(
+        treatment_id,
+        dbData.name,
+        dbData.swedish,
+        sub_treatment_id || null
+    );
+    if (existingSubTreatmentByName) {
+        return handleError(res, 409, language, "SUBTREATMENT_ALREADY_EXISTS");
+    }
+
     // ✳️ EDIT FLOW
     if (sub_treatment_id) {
         const updateSubTreatment = {
@@ -347,6 +373,15 @@ export const addEditSubTreatmentMaster = asyncHandler(async (req, res) => {
     }
 
     let newId = sub_treatment_id;
+
+    const [existingSubTreatmentMasterByName] = await checkExistingSubTreatmentMasterByNameModel(
+        dbData.name,
+        dbData.swedish,
+        sub_treatment_id || null
+    );
+    if (existingSubTreatmentMasterByName) {
+        return handleError(res, 409, language, "SUB_TREATMENT_MASTER_ALREADY_EXISTS");
+    }
 
     /*
     |--------------------------------------------------------------------------
@@ -627,6 +662,11 @@ export const addEditConcern = asyncHandler(async (req, res) => {
 
     // ✳️ EDIT FLOW
     if (concern_id) {
+        const [existingConcern] = await checkExistingConcernByNameModel(dbData.name, dbData.swedish, concern_id);
+        if (existingConcern) {
+            return handleError(res, 409, language, "CONCERN_ALREADY_EXISTS");
+        }
+
         if (!isAdmin) {
             const [existing] = await checkExistingConcernModel(concern_id, user_id);
             if (!existing) {
@@ -638,6 +678,11 @@ export const addEditConcern = asyncHandler(async (req, res) => {
     }
     // ✳️ CREATE FLOW
     else {
+        const [existingConcern] = await checkExistingConcernByNameModel(dbData.name, dbData.swedish);
+        if (existingConcern) {
+            return handleError(res, 409, language, "CONCERN_ALREADY_EXISTS");
+        }
+
         concern_id = uuidv4();
         dbData.concern_id = concern_id;
 
@@ -979,6 +1024,11 @@ export const addEditLikeWiseTerms = asyncHandler(async (req, res) => {
 
     // ✳️ EDIT FLOW
     if (like_wise_term_id) {
+        const [existingLikeWiseTerm] = await checkExistingLikeWiseTermsByNameModel(dbData.name, dbData.swedish, like_wise_term_id);
+        if (existingLikeWiseTerm) {
+            return handleError(res, 409, language, "LIKEWISETERM_ALREADY_EXISTS");
+        }
+
         if (!isAdmin) {
             const [existing] = await checkExistingLikeWiseTermsModel(like_wise_term_id, user_id);
             if (!existing) {
@@ -990,6 +1040,11 @@ export const addEditLikeWiseTerms = asyncHandler(async (req, res) => {
     }
     // ✳️ CREATE FLOW
     else {
+        const [existingLikeWiseTerm] = await checkExistingLikeWiseTermsByNameModel(dbData.name, dbData.swedish);
+        if (existingLikeWiseTerm) {
+            return handleError(res, 409, language, "LIKEWISETERM_ALREADY_EXISTS");
+        }
+
         like_wise_term_id = uuidv4();
         dbData.like_wise_term_id = like_wise_term_id;
 
@@ -1079,6 +1134,11 @@ export const addEditDevice = asyncHandler(async (req, res) => {
 
     // ✳️ EDIT FLOW
     if (device_id) {
+        const [existingDeviceByName] = await checkExistingDeviceByNameModel(dbData.name, dbData.swedish, device_id);
+        if (existingDeviceByName) {
+            return handleError(res, 409, language, "DEVICE_ALREADY_EXISTS");
+        }
+
         if (!isAdmin) {
             const [existing] = await checkExistingDeviceModel(device_id, user_id);
             if (!existing) {
@@ -1090,6 +1150,11 @@ export const addEditDevice = asyncHandler(async (req, res) => {
     }
     // ✳️ CREATE FLOW
     else {
+        const [existingDeviceByName] = await checkExistingDeviceByNameModel(dbData.name, dbData.swedish);
+        if (existingDeviceByName) {
+            return handleError(res, 409, language, "DEVICE_ALREADY_EXISTS");
+        }
+
         device_id = uuidv4();
         dbData.device_id = device_id;
 
@@ -1181,6 +1246,11 @@ export const addEditBenefit = asyncHandler(async (req, res) => {
 
     // ✳️ EDIT FLOW
     if (benefit_id) {
+        const [existingBenefitByName] = await checkExistingBenefitByNameModel(dbData.name, dbData.swedish, benefit_id);
+        if (existingBenefitByName) {
+            return handleError(res, 409, language, "BENEFIT_ALREADY_EXISTS");
+        }
+
         if (!isAdmin) {
             const [existing] = await checkExistingBenifitsModel(benefit_id, user_id);
             if (!existing) {
@@ -1192,6 +1262,11 @@ export const addEditBenefit = asyncHandler(async (req, res) => {
     }
     // ✳️ CREATE FLOW
     else {
+        const [existingBenefitByName] = await checkExistingBenefitByNameModel(dbData.name, dbData.swedish);
+        if (existingBenefitByName) {
+            return handleError(res, 409, language, "BENEFIT_ALREADY_EXISTS");
+        }
+
         benefit_id = uuidv4();
         dbData.benefit_id = benefit_id;
 

@@ -1,12 +1,35 @@
 import configs from "../config/config.js";
 import db from "../config/db.js";
-import { openai } from "../../app.js"
 import { deleteGuestDataModel, getInvitedZynqUsers } from "../models/api.js";
 import { zynqReminderEnglishTemplate, zynqReminderSwedishTemplate } from "./templates.js";
 import { cosineSimilarity } from "./user_helper.js";
 import axios from "axios";
 import OpenAI from "openai";
-const client = new OpenAI({ apiKey: process.env.OPENAI_KEY });
+import dotenv from "dotenv";
+import {
+  parseSearchIntent,
+  normalizeSearchText,
+  isTextAllowedForIntent,
+  isTextExcludedByNegation
+} from "../search/intent_taxonomy.js";
+import { resolveProtectedDisplayName, restoreCanonicalBrandTerms } from "../search/protected_terms.js";
+dotenv.config();
+const OPENAI_SEARCH_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
+const client = OPENAI_SEARCH_KEY ? new OpenAI({ apiKey: OPENAI_SEARCH_KEY }) : null;
+
+async function createSearchChatCompletion(payload, context = "search_similarity") {
+  if (!client) {
+    console.warn(`[${context}] OpenAI key missing. Falling back to lexical ranking.`);
+    return null;
+  }
+
+  try {
+    return await client.chat.completions.create(payload);
+  } catch (error) {
+    console.error(`[${context}] OpenAI similarity failed:`, error?.message || error);
+    return null;
+  }
+}
 // 🔹 Levenshtein distance (edit distance)
 const levenshteinDistance = (a, b) => {
   const m = a.length, n = b.length;
@@ -55,73 +78,16 @@ const phraseMeaningSimilarity = (a, b) => {
   return total / aTokens.length;
 };
 
-const STRICT_INTENT_SYNONYMS = {
-  laser: [
-    "laser",
-    "laser treatment",
-    "laser treatments",
-    "laserbehandling",
-    "laserbehandlingar",
-    "laserbehandlingen",
-    "nd yag",
-    "ndyag",
-    "ipl laser"
-  ],
-  botox: ["botox", "botulinum toxin", "botulinum", "bo tox"],
-  filler: ["filler", "fillers", "dermal filler", "dermal fillers"],
-  prp: ["prp", "platelet rich plasma", "vampire facial"],
-  hydrafacial: ["hydrafacial", "hydra facial", "hydrafacial treatment"],
-  morpheus8: ["morpheus8", "morpheus 8", "morpheus-eight"],
-  emsella: ["emsella", "em-sella"],
-  skinbooster: ["skinbooster", "skin booster", "skinboosters", "skin boosters"],
-  facial: ["facial", "facials", "ansiktsbehandling", "ansiktsbehandlingar"]
-};
-
-const BROAD_CONCERN_SYNONYMS = {
-  acne: ["acne", "akne", "breakout", "breakouts", "pimple", "pimples"],
-  wrinkles: ["wrinkle", "wrinkles", "fine lines", "linjer"],
-  pigmentation: ["pigmentation", "pigmentering", "melasma", "dark spots"],
-  skin_tightening: ["skin tightening", "huduppstramning", "tightening", "firming"],
-  hair_removal: ["hair removal", "harborttagning", "h\u00e5rborttagning"]
-};
-
-const NEGATIVE_PATTERNS = [
-  /\bnon[\s-]?laser\b/i,
-  /\bnot[\s-]?laser\b/i,
-  /\bwithout[\s-]?laser\b/i,
-  /\blaser[\s-]?free\b/i,
-  /\binte[\s-]?laser\b/i,
-  /\butan[\s-]?laser\b/i
-];
-
-const TOKEN_REWRITE = {
-  "morpheus 8": "morpheus8",
-  "nd:yag": "nd yag",
-  "n d yag": "nd yag",
-  "laserbehandling": "laser treatment",
-  "ansiktsbehandling": "facial treatment",
-  "harborttagning": "hair removal",
-  "h\u00e5rborttagning": "hair removal",
-  "pigmentering": "pigmentation",
-  "akne": "acne",
-  "huduppstramning": "skin tightening"
-};
-
 function normalizeText(value = "") {
-  let out = String(value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s:+-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizeSearchText(value);
+}
 
-  for (const [from, to] of Object.entries(TOKEN_REWRITE)) {
-    const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    out = out.replace(new RegExp(`\\b${escaped}\\b`, "g"), to);
-  }
+function canonicalizeBrandText(value = "") {
+  return restoreCanonicalBrandTerms(String(value || ""));
+}
 
-  return out.replace(/\s+/g, " ").trim();
+function renderEntityName(canonical = "", localized = "", options = {}) {
+  return resolveProtectedDisplayName(canonical, localized, options);
 }
 
 function includesPhrase(haystack, phrase) {
@@ -131,49 +97,11 @@ function includesPhrase(haystack, phrase) {
 }
 
 function detectCanonicalIntent(rawSearch = "") {
-  const normalized = normalizeText(rawSearch);
-  const hasNegation = NEGATIVE_PATTERNS.some((re) => re.test(normalized));
-
-  let strictIntent = null;
-  let strictMatchedPhrase = "";
-  for (const [intent, synonyms] of Object.entries(STRICT_INTENT_SYNONYMS)) {
-    for (const synonym of synonyms) {
-      const normSyn = normalizeText(synonym);
-      if (includesPhrase(normalized, normSyn) && normSyn.length > strictMatchedPhrase.length) {
-        strictIntent = intent;
-        strictMatchedPhrase = normSyn;
-      }
-    }
-  }
-
-  let broadIntent = null;
-  let broadMatchedPhrase = "";
-  for (const [intent, synonyms] of Object.entries(BROAD_CONCERN_SYNONYMS)) {
-    for (const synonym of synonyms) {
-      const normSyn = normalizeText(synonym);
-      if (includesPhrase(normalized, normSyn) && normSyn.length > broadMatchedPhrase.length) {
-        broadIntent = intent;
-        broadMatchedPhrase = normSyn;
-      }
-    }
-  }
-
-  const language = /[\u00e5\u00e4\u00f6]/i.test(rawSearch) ? "sv" : "en";
-  const intentType = strictIntent
-    ? "strict_category"
-    : broadIntent
-      ? "broad_concern"
-      : "general";
-
+  const parsed = parseSearchIntent(rawSearch);
   return {
-    raw: rawSearch,
-    normalized,
-    language,
-    intentType,
-    strictIntent,
-    broadIntent,
-    hasNegation,
-    canonicalIntent: strictIntent || broadIntent || null
+    ...parsed,
+    strictIntent: parsed.intentType === "strict_category" ? parsed.intentBucket : null,
+    broadIntent: parsed.intentType === "broad_concern" ? parsed.intentBucket : null
   };
 }
 
@@ -220,20 +148,12 @@ function computeLexicalScore(text, queryInfo, row = {}) {
 }
 
 function isRowInIntentCategory(text, row, queryInfo) {
-  const intent = queryInfo.strictIntent;
-  if (!intent) return true;
-
-  const synonyms = STRICT_INTENT_SYNONYMS[intent] || [];
-  const hit = synonyms.some((s) => includesPhrase(text, normalizeText(s)));
-  if (!hit) return false;
-
-  if (queryInfo.hasNegation && intent === "laser") return false;
-  return true;
+  if (!queryInfo?.canonicalIntent) return true;
+  return isTextAllowedForIntent(text, queryInfo);
 }
 
 function isRowExcludedByNegation(text, queryInfo) {
-  if (!queryInfo.hasNegation) return false;
-  return includesPhrase(text, "laser");
+  return isTextExcludedByNegation(text, queryInfo);
 }
 
 const TREATMENT_SEARCH_CACHE = new Map();
@@ -290,8 +210,8 @@ function setCachedTreatmentRankings(cacheKey, rankings) {
 
 function treatmentTieBreaker(a, b) {
   if ((b.score ?? 0) !== (a.score ?? 0)) return (b.score ?? 0) - (a.score ?? 0);
-  if ((b.lexical_score ?? 0) !== (a.lexical_score ?? 0)) return (b.lexical_score ?? 0) - (a.lexical_score ?? 0);
   if ((b.exact_match ?? 0) !== (a.exact_match ?? 0)) return (b.exact_match ?? 0) - (a.exact_match ?? 0);
+  if ((b.lexical_score ?? 0) !== (a.lexical_score ?? 0)) return (b.lexical_score ?? 0) - (a.lexical_score ?? 0);
 
   const aName = normalizeText(a.name || a.swedish || "");
   const bName = normalizeText(b.name || b.swedish || "");
@@ -309,6 +229,9 @@ function resolveCachedTreatmentRows(rows, cachedRankings = []) {
         score: item.score,
         lexical_score: item.lexical_score,
         semantic_score: item.semantic_score,
+        intent_score: item.intent_score,
+        category_score: item.category_score,
+        penalty_score: item.penalty_score,
         exact_match: item.exact_match,
         is_fallback: item.is_fallback,
         match_stage: item.match_stage
@@ -443,11 +366,16 @@ export const getTreatmentsAIResult = async (
   search,
   threshold = 0.40,
   topN = null,
-  language = "en"
+  language = "en",
+  options = {}
 ) => {
   if (!search?.trim()) return rows;
+  const debugEnabled = Boolean(options?.debug);
 
   const queryInfo = detectCanonicalIntent(search);
+  const queryProfile = options?.queryProfile || null;
+  const adaptiveThreshold = Number(options?.adaptiveThreshold ?? NaN);
+  const adaptiveCap = Number(options?.adaptiveCap ?? NaN);
   const cacheKey = buildTreatmentCacheKey(queryInfo, rows, threshold);
   const cachedRankings = getCachedTreatmentRankings(cacheKey);
 
@@ -456,18 +384,38 @@ export const getTreatmentsAIResult = async (
 
     const translatedFromCache = cachedResolved.map((result) => ({
       ...result,
-      name: language === "en" ? result.name : result.swedish,
+      name: language === "en"
+        ? canonicalizeBrandText(result.name)
+        : renderEntityName(result.name, result.swedish),
       benefits: language === "en" ? result.benefits_en : result.benefits_sv,
-      like_wise_terms: language === "en"
+      like_wise_terms: canonicalizeBrandText(language === "en"
         ? result.like_wise_terms
-        : (result.like_wise_terms_swedish || result.like_wise_terms),
-      device_name: language === "en"
+        : (result.like_wise_terms_swedish || result.like_wise_terms)),
+      device_name: canonicalizeBrandText(language === "en"
         ? result.device_name
-        : (result.device_name_swedish || result.device_name),
+        : (result.device_name_swedish || result.device_name)),
       description: language === "en" ? result.description_en : result.description_sv
     }));
 
-    return topN ? translatedFromCache.slice(0, topN) : translatedFromCache;
+    const cachedOutput = debugEnabled
+      ? translatedFromCache.map((result) => ({
+        ...result,
+        _debug: {
+          why_matched: result.match_stage || "cached",
+          intent_bucket: queryInfo.intentBucket || null,
+          intent_confidence: queryInfo.intentConfidence ?? 0,
+          intent_score: result.intent_score ?? 0,
+          category_score: result.category_score ?? 0,
+          semantic_score: result.semantic_score ?? 0,
+          lexical_score: result.lexical_score ?? 0,
+          penalty_score: result.penalty_score ?? 0,
+          fallback_stage: result.is_fallback ? "fallback" : "primary",
+          source: "cache"
+        }
+      }))
+      : translatedFromCache;
+
+    return topN ? cachedOutput.slice(0, topN) : cachedOutput;
   }
 
   const inFlight = TREATMENT_INFLIGHT_REQUESTS.get(cacheKey);
@@ -483,18 +431,38 @@ export const getTreatmentsAIResult = async (
       const warmedResolved = resolveCachedTreatmentRows(rows, warmedRankings);
       const translatedWarmed = warmedResolved.map((result) => ({
         ...result,
-        name: language === "en" ? result.name : result.swedish,
+        name: language === "en"
+          ? canonicalizeBrandText(result.name)
+          : renderEntityName(result.name, result.swedish),
         benefits: language === "en" ? result.benefits_en : result.benefits_sv,
-        like_wise_terms: language === "en"
+        like_wise_terms: canonicalizeBrandText(language === "en"
           ? result.like_wise_terms
-          : (result.like_wise_terms_swedish || result.like_wise_terms),
-        device_name: language === "en"
+          : (result.like_wise_terms_swedish || result.like_wise_terms)),
+        device_name: canonicalizeBrandText(language === "en"
           ? result.device_name
-          : (result.device_name_swedish || result.device_name),
+          : (result.device_name_swedish || result.device_name)),
         description: language === "en" ? result.description_en : result.description_sv
       }));
 
-      return topN ? translatedWarmed.slice(0, topN) : translatedWarmed;
+      const warmedOutput = debugEnabled
+        ? translatedWarmed.map((result) => ({
+          ...result,
+          _debug: {
+            why_matched: result.match_stage || "cached",
+            intent_bucket: queryInfo.intentBucket || null,
+            intent_confidence: queryInfo.intentConfidence ?? 0,
+            intent_score: result.intent_score ?? 0,
+            category_score: result.category_score ?? 0,
+            semantic_score: result.semantic_score ?? 0,
+            lexical_score: result.lexical_score ?? 0,
+            penalty_score: result.penalty_score ?? 0,
+            fallback_stage: result.is_fallback ? "fallback" : "primary",
+            source: "cache_warm"
+          }
+        }))
+        : translatedWarmed;
+
+      return topN ? warmedOutput.slice(0, topN) : warmedOutput;
     }
   }
 
@@ -518,8 +486,8 @@ export const getTreatmentsAIResult = async (
       .filter((row) => !isRowExcludedByNegation(row._matchText, queryInfo))
       .filter((row) => isRowInIntentCategory(row._matchText, row, queryInfo));
 
-    // If strict intent has no guarded candidates, keep it strict and avoid cross-category leakage.
-    if (!guarded.length && queryInfo.intentType !== "strict_category") {
+    // Never widen to cross-category candidates when we have a detected canonical intent.
+    if (!guarded.length && !queryInfo.canonicalIntent) {
       guarded = prepared.filter((row) => !isRowExcludedByNegation(row._matchText, queryInfo));
     }
 
@@ -540,40 +508,60 @@ export const getTreatmentsAIResult = async (
     const scored = guarded.map((r) => {
       const gptScore = scoreMap.get(r.treatment_id) ?? 0;
       const lexical = r._lexicalScore;
-      const finalScore = shouldUseSemantic
-        ? (0.45 * lexical) + (0.55 * gptScore)
-        : lexical;
 
       const exactCategoryHit = queryInfo.strictIntent && isRowInIntentCategory(r._matchText, r, queryInfo);
+      const intentScore = exactCategoryHit ? 1 : (queryInfo.canonicalIntent ? 0.25 : 0.5);
+      const categoryScore = queryInfo.canonicalIntent
+        ? (isRowInIntentCategory(r._matchText, r, queryInfo) ? 1 : 0)
+        : 0.7;
+      const penaltyScore = queryInfo.canonicalIntent && !isRowInIntentCategory(r._matchText, r, queryInfo)
+        ? 0.6
+        : 0;
+      const weightedScore = (0.58 * lexical) + (0.14 * gptScore) + (0.18 * intentScore) + (0.10 * categoryScore) - penaltyScore;
+      const exactBonus = r._exactMatch ? 0.2 : 0;
 
       return {
         ...r,
         lexical_score: lexical,
         semantic_score: gptScore,
+        intent_score: intentScore,
+        category_score: categoryScore,
+        penalty_score: penaltyScore,
         exact_match: r._exactMatch,
-        score: Math.min(finalScore + (exactCategoryHit ? 0.08 : 0), 1)
+        score: Math.min(Math.max(weightedScore + (exactCategoryHit ? 0.08 : 0) + exactBonus, 0), 1)
       };
     });
 
-    const primaryThreshold = queryInfo.intentType === "strict_category"
+    const basePrimaryThreshold = queryInfo.intentType === "strict_category"
       ? Math.max(0.55, threshold)
       : Math.max(0.45, threshold);
+    const primaryThreshold = Number.isFinite(adaptiveThreshold)
+      ? Math.max(basePrimaryThreshold, adaptiveThreshold)
+      : basePrimaryThreshold;
 
     const primary = scored
       .filter((r) => r.score >= primaryThreshold || r._lexicalScore >= 0.78)
-      .map((r) => ({ ...r, is_fallback: false, match_stage: "primary" }))
+      .map((r) => ({
+        ...r,
+        is_fallback: false,
+        match_stage: r.exact_match ? "exact_lexical" : (shouldUseSemantic ? "strong_semantic" : "intent_lexical")
+      }))
       .sort(treatmentTieBreaker);
 
     // Fallback is only for broad/general intents and always appended after primary.
-    const fallback = (queryInfo.intentType === "strict_category" || primary.length > 0)
+    const fallbackSuppressedByProfile = queryProfile?.narrow_intent || queryProfile?.specificity >= 0.62;
+    const fallback = (queryInfo.canonicalIntent || primary.length >= 4 || fallbackSuppressedByProfile)
       ? []
       : scored
-        .filter((r) => r.score >= 0.32)
+        .filter((r) => r.score >= 0.4)
         .sort(treatmentTieBreaker)
-        .slice(0, 8)
-        .map((r) => ({ ...r, is_fallback: true, match_stage: "fallback" }));
+        .slice(0, 5)
+        .map((r) => ({ ...r, is_fallback: true, match_stage: "weak_fallback" }));
 
-    const filtered = [...primary, ...fallback];
+    let filtered = [...primary, ...fallback];
+    if (Number.isFinite(adaptiveCap) && adaptiveCap > 0) {
+      filtered = filtered.slice(0, adaptiveCap);
+    }
 
     setCachedTreatmentRankings(
       cacheKey,
@@ -582,6 +570,9 @@ export const getTreatmentsAIResult = async (
         score: r.score ?? 0,
         lexical_score: r.lexical_score ?? 0,
         semantic_score: r.semantic_score ?? 0,
+        intent_score: r.intent_score ?? 0,
+        category_score: r.category_score ?? 0,
+        penalty_score: r.penalty_score ?? 0,
         exact_match: r.exact_match ?? 0,
         is_fallback: Boolean(r.is_fallback),
         match_stage: r.match_stage || "primary"
@@ -604,18 +595,37 @@ export const getTreatmentsAIResult = async (
 
   const translated = filtered.map(result => ({
     ...result,
-    name: language === "en" ? result.name : result.swedish,
+    name: language === "en"
+      ? canonicalizeBrandText(result.name)
+      : renderEntityName(result.name, result.swedish),
     benefits: language === "en" ? result.benefits_en : result.benefits_sv,
-    like_wise_terms: language === "en"
+    like_wise_terms: canonicalizeBrandText(language === "en"
       ? result.like_wise_terms
-      : (result.like_wise_terms_swedish || result.like_wise_terms),
-    device_name: language === "en"
+      : (result.like_wise_terms_swedish || result.like_wise_terms)),
+    device_name: canonicalizeBrandText(language === "en"
       ? result.device_name
-      : (result.device_name_swedish || result.device_name),
+      : (result.device_name_swedish || result.device_name)),
     description: language === "en"
       ? result.description_en
       : result.description_sv
   }));
+
+  if (debugEnabled) {
+    return translated.map((result) => ({
+      ...result,
+      _debug: {
+        why_matched: result.match_stage,
+        intent_bucket: queryInfo.intentBucket || null,
+        intent_confidence: queryInfo.intentConfidence ?? 0,
+        intent_score: result.intent_score ?? 0,
+        category_score: result.category_score ?? 0,
+        semantic_score: result.semantic_score ?? 0,
+        lexical_score: result.lexical_score ?? 0,
+        penalty_score: result.penalty_score ?? 0,
+        fallback_stage: result.is_fallback ? "fallback" : "primary",
+      }
+    }));
+  }
 
   return topN ? translated.slice(0, topN) : translated;
 };
@@ -633,7 +643,10 @@ export const getSubTreatmentsAIResult = async (
   const normalizedSearch = queryInfo.normalized;
 
   // ----- Step 1: GPT similarity -----
-  const gptScoreResults = await batchGPTSimilaritySubTreatments(rows, normalizedSearch);
+  const shouldUseSemantic = queryInfo.intentType === "general";
+  const gptScoreResults = shouldUseSemantic
+    ? await batchGPTSimilaritySubTreatments(rows, normalizedSearch)
+    : [];
 
   const gptScoreMap = new Map();
   gptScoreResults.forEach(r => gptScoreMap.set(r.id, r.score));
@@ -658,8 +671,10 @@ export const getSubTreatmentsAIResult = async (
 
     // ----- Step 3: Combine scores (weight: 60% GPT, 40% manual) -----
     const final_score = queryInfo.intentType === "strict_category"
-      ? (0.7 * nameScore) + (0.3 * gptScore)
-      : (0.55 * gptScore) + (0.45 * nameScore);
+      ? (0.86 * nameScore) + (0.14 * gptScore)
+      : shouldUseSemantic
+        ? (0.62 * nameScore) + (0.38 * gptScore)
+        : nameScore;
 
     return {
       ...r,
@@ -683,8 +698,12 @@ export const getSubTreatmentsAIResult = async (
   // ----- Step 5: Translate if needed -----
   const translated = filtered.map(r => ({
     ...r,
-    name: language === "en" ? r.name : r.swedish,
-    treatment_name: language === "en" ? r.treatment_name : r.treatment_swedish,
+    name: language === "en"
+      ? canonicalizeBrandText(r.name)
+      : renderEntityName(r.name, r.swedish),
+    treatment_name: language === "en"
+      ? canonicalizeBrandText(r.treatment_name)
+      : renderEntityName(r.treatment_name, r.treatment_swedish),
   }));
 
   // ----- Step 6: Limit top N if requested -----
@@ -1122,8 +1141,8 @@ const finalResults = rowsWithText.map(r => {
 function computeDeviceNameScore(deviceName, search) {
   if (!deviceName || !search) return 0;
 
-  const name = deviceName.toLowerCase();
-  const query = search.toLowerCase();
+  const name = normalizeText(deviceName);
+  const query = normalizeText(search);
 
   // Normalize plurals
   const normalize = str =>
@@ -1146,7 +1165,47 @@ function computeDeviceNameScore(deviceName, search) {
 
   if (matched.length > 0) return 0.75;
 
-  return 0;
+  const fuzzy = phraseMeaningSimilarity(queryNorm, nameNorm);
+  return fuzzy >= 0.76 ? fuzzy * 0.72 : 0;
+}
+
+function buildDeviceMatchText(row = {}) {
+  return normalizeText([
+    row.device_name,
+    row.device_swedish,
+    row.treatment_name,
+    row.treatment_swedish,
+    row.classification_type
+  ].filter(Boolean).join(" "));
+}
+
+function getQueryEntityTokens(queryInfo = {}) {
+  const queryTokens = normalizeText(queryInfo?.normalized || queryInfo?.raw || "")
+    .split(/\s+/)
+    .filter((token) => token.length >= 4);
+  const intentTokens = normalizeText(queryInfo?.matchedKeyword || "")
+    .split(/\s+/)
+    .filter(Boolean);
+  const intentTokenSet = new Set(intentTokens);
+
+  return queryTokens.filter((token) => !intentTokenSet.has(token));
+}
+
+function hasDeviceEntityTokenMatch(row = {}, queryInfo = {}) {
+  const entityTokens = getQueryEntityTokens(queryInfo);
+  if (!entityTokens.length) return false;
+
+  const deviceText = normalizeText([
+    row.device_name,
+    row.device_swedish
+  ].filter(Boolean).join(" "));
+  const deviceTokens = deviceText.split(/\s+/).filter(Boolean);
+
+  return entityTokens.some((queryToken) => deviceTokens.some((deviceToken) => (
+    deviceToken === queryToken ||
+    deviceToken.startsWith(queryToken) ||
+    queryToken.startsWith(deviceToken)
+  )));
 }
 
 
@@ -1154,37 +1213,110 @@ export const getDevicesAIResult = async (
   rows,
   search,
   threshold = 0.40,
-  topN = null
+  topN = null,
+  options = {}
 ) => {
   if (!search?.trim()) return rows;
 
-  const normalizedSearch = search.trim().toLowerCase();
+  const queryInfo = detectCanonicalIntent(search);
+  const normalizedSearch = queryInfo.normalized;
+  const queryProfile = options?.queryProfile || null;
+  const adaptiveThreshold = Number(options?.adaptiveThreshold ?? NaN);
+  const adaptiveCap = Number(options?.adaptiveCap ?? NaN);
 
-  const gptScoreResults = await batchDeviceGPTSimilarity(rows, normalizedSearch);
-  const gptScoreMap = new Map(gptScoreResults.map(r => [r.id, r.score]));
+  const guardedRows = rows
+    .map((r) => ({ ...r, _matchText: buildDeviceMatchText(r) }))
+    .filter((r) => !isRowExcludedByNegation(r._matchText, queryInfo))
+    .filter((r) => isTextAllowedForIntent(r._matchText, queryInfo) || hasDeviceEntityTokenMatch(r, queryInfo));
 
-  const scored = rows.map(r => {
+  const shouldUseSemantic = queryInfo.intentType === "general";
+  const gptScoreResults = shouldUseSemantic
+    ? await batchDeviceGPTSimilarity(guardedRows, normalizedSearch)
+    : [];
+  const gptScoreMap = new Map(gptScoreResults.map((r) => [r.id, r.score]));
+
+  const scored = guardedRows.map((r) => {
     const gptScore = gptScoreMap.get(r.id) ?? 0;
     const nameScore = computeDeviceNameScore(r.device_name, normalizedSearch);
+    const swedishNameScore = computeDeviceNameScore(r.device_swedish, normalizedSearch);
+    const combinedNameScore = Math.max(nameScore, swedishNameScore);
+    const treatmentNameScore = Math.max(
+      computeDeviceNameScore(r.treatment_name, normalizedSearch),
+      computeDeviceNameScore(r.treatment_swedish, normalizedSearch)
+    );
+    const exactMatch = combinedNameScore >= 0.999 ? 1 : 0;
+    const intentScore = queryInfo.canonicalIntent ? 1 : 0.7;
+    const mappedTreatmentScore = queryInfo.canonicalIntent
+      ? Math.min(treatmentNameScore, 0.72)
+      : Math.min(treatmentNameScore, 0.58);
 
-    let final_score;
-    if (nameScore >= 0.8) {
-      final_score = Math.max(gptScore, nameScore);
-    } else {
-      final_score = 0.6 * gptScore + 0.4 * nameScore;
-    }
+    const deviceCoreScore = (0.78 * combinedNameScore) + (0.12 * intentScore) + (0.10 * gptScore);
+    const mappedTreatmentCoreScore = (0.58 * mappedTreatmentScore) + (0.12 * intentScore);
+    const final_score = exactMatch
+      ? 1
+      : Math.min(1, Math.max(deviceCoreScore, mappedTreatmentCoreScore));
 
     return {
       ...r,
       gpt_score: gptScore,
-      name_score: nameScore,
+      name_score: combinedNameScore,
+      treatment_name_score: treatmentNameScore,
+      exact_match: exactMatch,
       final_score
     };
   });
 
-  const filtered = scored
-    .filter(r => r.final_score >= threshold || r.name_score >= 0.8)
-    .sort((a, b) => b.final_score - a.final_score);
+  const exactMatches = scored.filter((r) => r.exact_match);
+  const exactDeviceIds = new Set(exactMatches.map((r) => r.device_id).filter(Boolean));
+  const baseStrictThreshold = queryInfo.intentType === "strict_category"
+    ? Math.max(0.62, threshold)
+    : queryInfo.canonicalIntent
+      ? Math.max(0.50, threshold)
+    : Math.max(0.45, threshold);
+  const profileStrictness = queryProfile?.typo_or_partial_intent ? 0.08 : 0;
+  const strictThreshold = Number.isFinite(adaptiveThreshold)
+    ? Math.min(0.88, Math.max(baseStrictThreshold, adaptiveThreshold) + profileStrictness)
+    : Math.min(0.88, baseStrictThreshold + profileStrictness);
+
+  let filtered = scored
+    .filter((r) => r.final_score >= strictThreshold || r.name_score >= 0.72 || r.treatment_name_score >= 0.72)
+    .sort((a, b) => {
+      if ((b.exact_match ?? 0) !== (a.exact_match ?? 0)) return (b.exact_match ?? 0) - (a.exact_match ?? 0);
+      if ((b.final_score ?? 0) !== (a.final_score ?? 0)) return (b.final_score ?? 0) - (a.final_score ?? 0);
+      if ((b.name_score ?? 0) !== (a.name_score ?? 0)) return (b.name_score ?? 0) - (a.name_score ?? 0);
+      return normalizeText(a.device_name || "").localeCompare(normalizeText(b.device_name || ""));
+    });
+
+  if (exactDeviceIds.size > 0) {
+    filtered = filtered.filter((r) => exactDeviceIds.has(r.device_id));
+  }
+
+  if ((queryProfile?.narrow_intent || queryProfile?.typo_or_partial_intent) && filtered.length > 0) {
+    // Specific or partial queries keep only the strongest mapped/high-confidence candidates.
+    filtered = filtered
+      .filter((r) => (
+        r.exact_match ||
+        (Number(r.relation_priority || 99) <= 2) ||
+        Number(r.name_score || 0) >= 0.72 ||
+        Number(r.treatment_name_score || 0) >= 0.72
+      ))
+      .slice(0, queryProfile?.typo_or_partial_intent ? 6 : 10);
+  }
+
+  if (Number.isFinite(adaptiveCap) && adaptiveCap > 0) {
+    const profileCap = queryProfile?.typo_or_partial_intent
+      ? Math.min(adaptiveCap, 6)
+      : (queryProfile?.broad_intent ? Math.min(adaptiveCap, 10) : adaptiveCap);
+    filtered = filtered.slice(0, profileCap);
+  }
+
+  filtered = filtered.map((r) => ({
+    ...r,
+    device_name: renderEntityName(r.device_name, r.device_swedish, { alwaysProtect: true }),
+    device_swedish: renderEntityName(r.device_name, r.device_swedish, { alwaysProtect: true }),
+    treatment_name: renderEntityName(r.treatment_name, r.treatment_swedish),
+    treatment_swedish: renderEntityName(r.treatment_name, r.treatment_swedish)
+  }));
 
   return topN ? filtered.slice(0, topN) : filtered;
 };
@@ -1453,7 +1585,7 @@ ALLOWED IDs:
 ${JSON.stringify(rows.map(r => r.treatment_id))}
 `;
 
-  const res = await client.chat.completions.create({
+  const res = await createSearchChatCompletion({
     model: "gpt-4.1-mini",
     temperature: 0,
     response_format: { type: "json_object" },
@@ -1467,7 +1599,9 @@ ${JSON.stringify(rows.map(r => r.treatment_id))}
         content: prompt
       }
     ]
-  });
+  }, "batchGPTSimilarity");
+
+  if (!res) return [];
 
   const raw = res.choices[0].message.content;
 
@@ -1527,7 +1661,7 @@ ALLOWED IDs:
 ${JSON.stringify(batch.map(r => r.sub_treatment_id))}
 `;
 
-  const res = await client.chat.completions.create({
+  const res = await createSearchChatCompletion({
     model: "gpt-4.1-mini",
     temperature: 0,
     response_format: { type: "json_object" },
@@ -1535,7 +1669,9 @@ ${JSON.stringify(batch.map(r => r.sub_treatment_id))}
       { role: "system", content: "You output ONLY valid JSON. No extra text. No markdown." },
       { role: "user", content: prompt }
     ]
-  });
+  }, "runSubTreatmentSimilarityBatch");
+
+  if (!res) return [];
 
   const raw = res.choices[0].message.content;
 
@@ -1699,16 +1835,18 @@ ${list.join("\n")}
   // ${list.join("\n")}
   //   `;
 
-  const res = await client.chat.completions.create({
+  const res = await createSearchChatCompletion({
     model: "gpt-4.1-mini",
-    temperature: 0.3,
-    max_tokens: 4096,
+    temperature: 0,
+    max_completion_tokens: 4096,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: "Return ONLY pure JSON. No markdown." },
       { role: "user", content: prompt }
     ]
-  });
+  }, "runDeviceSimilarityBatch");
+
+  if (!res) return [];
 
   const raw = res.choices[0].message.content;
 
@@ -1803,15 +1941,17 @@ ITEM LIST (id|text):
 ${list.join("\n")}
 `;
 
-  const res = await client.chat.completions.create({
+  const res = await createSearchChatCompletion({
     model: "gpt-4.1-mini",
-    temperature: 0.3,
+    temperature: 0,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: "Output ONLY JSON. No markdown." },
       { role: "user", content: prompt }
     ]
-  });
+  }, "runSingleBatch");
+
+  if (!res) return [];
 
   const raw = res.choices[0].message.content;
 

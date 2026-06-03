@@ -3262,6 +3262,57 @@ export const addConcernModel = async (data) => {
     }
 }
 
+export const checkExistingTreatmentByNameModel = async (name, swedish, exclude_treatment_id = null) => {
+    try {
+        const params = [name, swedish];
+        let query = `
+            SELECT treatment_id
+            FROM tbl_treatments
+            WHERE is_deleted = 0
+              AND (
+                    LOWER(TRIM(name)) = LOWER(TRIM(?))
+                    OR LOWER(TRIM(swedish)) = LOWER(TRIM(?))
+              )
+        `;
+
+        if (exclude_treatment_id) {
+            query += ` AND treatment_id != ?`;
+            params.push(exclude_treatment_id);
+        }
+
+        query += ` LIMIT 1`;
+        return await db.query(query, params);
+    } catch (error) {
+        console.error("checkExistingTreatmentByNameModel error:", error);
+        throw error;
+    }
+}
+
+export const checkExistingConcernByNameModel = async (name, swedish, exclude_concern_id = null) => {
+    try {
+        const params = [name, swedish];
+        let query = `SELECT concern_id
+             FROM tbl_concerns
+             WHERE is_deleted = 0
+               AND (
+                    LOWER(TRIM(name)) = LOWER(TRIM(?))
+                    OR LOWER(TRIM(swedish)) = LOWER(TRIM(?))
+               )
+            `;
+
+        if (exclude_concern_id) {
+            query += ` AND concern_id != ?`;
+            params.push(exclude_concern_id);
+        }
+
+        query += ` LIMIT 1`;
+        return await db.query(query, params);
+    } catch (error) {
+        console.error("checkExistingConcernByNameModel error:", error);
+        throw error;
+    }
+}
+
 export const deleteConcernModel = async (concern_id) => {
     try {
         return await db.query(
@@ -3514,6 +3565,84 @@ export const addLikeWiseTermsModel = async (data) => {
     }
 };
 
+export const checkExistingSubTreatmentByNameModel = async (treatment_id, name, swedish, exclude_sub_treatment_id = null) => {
+    try {
+        const params = [treatment_id, name, swedish];
+        let query = `
+            SELECT sub_treatment_id
+            FROM tbl_sub_treatments
+            WHERE is_deleted = 0
+              AND treatment_id = ?
+              AND (
+                    LOWER(TRIM(name)) = LOWER(TRIM(?))
+                    OR LOWER(TRIM(swedish)) = LOWER(TRIM(?))
+              )
+        `;
+
+        if (exclude_sub_treatment_id) {
+            query += ` AND sub_treatment_id != ?`;
+            params.push(exclude_sub_treatment_id);
+        }
+
+        query += ` LIMIT 1`;
+        return await db.query(query, params);
+    } catch (error) {
+        console.error("checkExistingSubTreatmentByNameModel error:", error);
+        throw error;
+    }
+};
+
+export const checkExistingSubTreatmentMasterByNameModel = async (name, swedish, exclude_sub_treatment_id = null) => {
+    try {
+        const params = [name, swedish];
+        let query = `
+            SELECT sub_treatment_id
+            FROM tbl_sub_treatment_master
+            WHERE is_deleted = 0
+              AND (
+                    LOWER(TRIM(name)) = LOWER(TRIM(?))
+                    OR LOWER(TRIM(swedish)) = LOWER(TRIM(?))
+              )
+        `;
+
+        if (exclude_sub_treatment_id) {
+            query += ` AND sub_treatment_id != ?`;
+            params.push(exclude_sub_treatment_id);
+        }
+
+        query += ` LIMIT 1`;
+        return await db.query(query, params);
+    } catch (error) {
+        console.error("checkExistingSubTreatmentMasterByNameModel error:", error);
+        throw error;
+    }
+};
+
+export const checkExistingLikeWiseTermsByNameModel = async (name, swedish, exclude_like_wise_term_id = null) => {
+    try {
+        const params = [name, swedish];
+        let query = `SELECT like_wise_term_id
+             FROM tbl_likewise_terms
+             WHERE is_deleted = 0
+               AND (
+                    LOWER(TRIM(name)) = LOWER(TRIM(?))
+                    OR LOWER(TRIM(swedish)) = LOWER(TRIM(?))
+               )
+            `;
+
+        if (exclude_like_wise_term_id) {
+            query += ` AND like_wise_term_id != ?`;
+            params.push(exclude_like_wise_term_id);
+        }
+
+        query += ` LIMIT 1`;
+        return await db.query(query, params);
+    } catch (error) {
+        console.error("checkExistingLikeWiseTermsByNameModel error:", error);
+        throw error;
+    }
+};
+
 export const checkExistingLikeWiseTermsModel = async (like_wise_term_id, zynq_user_id) => {
     try {
         return await db.query(
@@ -3617,6 +3746,31 @@ export const checkExistingBenifitsModel = async (benefit_id, zynq_user_id) => {
         );
     } catch (error) {
         console.error("checkExistingConcernModel error:", error);
+        throw error;
+    }
+};
+
+export const checkExistingBenefitByNameModel = async (name, swedish, exclude_benefit_id = null) => {
+    try {
+        const params = [name, swedish];
+        let query = `SELECT benefit_id
+             FROM tbl_benefits
+             WHERE is_deleted = 0
+               AND (
+                    LOWER(TRIM(name)) = LOWER(TRIM(?))
+                    OR LOWER(TRIM(swedish)) = LOWER(TRIM(?))
+               )
+            `;
+
+        if (exclude_benefit_id) {
+            query += ` AND benefit_id != ?`;
+            params.push(exclude_benefit_id);
+        }
+
+        query += ` LIMIT 1`;
+        return await db.query(query, params);
+    } catch (error) {
+        console.error("checkExistingBenefitByNameModel error:", error);
         throw error;
     }
 };
@@ -3781,6 +3935,31 @@ export const checkExistingDeviceModel = async (device_id, zynq_user_id) => {
         );
     } catch (error) {
         console.error("checkExistingConcernModel error:", error);
+        throw error;
+    }
+};
+
+export const checkExistingDeviceByNameModel = async (name, swedish, exclude_device_id = null) => {
+    try {
+        const params = [name, swedish];
+        let query = `SELECT device_id
+             FROM tbl_devices
+             WHERE is_deleted = 0
+               AND (
+                    LOWER(TRIM(name)) = LOWER(TRIM(?))
+                    OR LOWER(TRIM(swedish)) = LOWER(TRIM(?))
+               )
+            `;
+
+        if (exclude_device_id) {
+            query += ` AND device_id != ?`;
+            params.push(exclude_device_id);
+        }
+
+        query += ` LIMIT 1`;
+        return await db.query(query, params);
+    } catch (error) {
+        console.error("checkExistingDeviceByNameModel error:", error);
         throw error;
     }
 };

@@ -26,6 +26,7 @@ export const getAllDoctorsSchema = joi.object({
     surgery_ids: idArrayValidation.optional(),
     concern_ids: idArrayValidation.optional(),
     search: stringValidation.optional(),
+    debug_search: joi.boolean().optional(),
     distance: joi.object({
       min: numberValidation.min(0),
       max: numberValidation.min(0)
