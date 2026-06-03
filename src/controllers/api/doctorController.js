@@ -344,7 +344,7 @@ export const get_recommended_doctors = asyncHandler(async (req, res) => {
         Object.keys(price).length === 0 &&
         !min_rating;
 
-        let isEmptySearch = false;
+    let isEmptySearch = false;
 
     if (areAllFiltersEmpty) {
         const fallbackTreatmentIds = await getTreatmentIDsByUserID(user_id);
@@ -1180,8 +1180,8 @@ export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res)
 
         console.log("[TREATMENT API DEBUG] typedPrimaryDevices accepted length:", typedPrimaryDevices?.accepted?.length);
 
-        const treatmentsArray = (debugSearch && rawTreatments && typeof rawTreatments === "object" && Array.isArray(rawTreatments.items)) 
-            ? rawTreatments.items 
+        const treatmentsArray = (debugSearch && rawTreatments && typeof rawTreatments === "object" && Array.isArray(rawTreatments.items))
+            ? rawTreatments.items
             : rawTreatments;
 
         console.log("[TREATMENT API DEBUG] treatmentsArray length:", treatmentsArray?.length);
