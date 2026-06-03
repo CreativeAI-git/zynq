@@ -1,11 +1,20 @@
 import configs from "../config/config.js";
 import db from "../config/db.js";
-import { openai } from "../../app.js"
 import { deleteGuestDataModel, getInvitedZynqUsers } from "../models/api.js";
 import { zynqReminderEnglishTemplate, zynqReminderSwedishTemplate } from "./templates.js";
 import { sendEmail } from "../services/send_email.js";
 import { cosineSimilarity } from "./user_helper.js";
 import axios from "axios";
+import OpenAI from "openai";
+import {
+    PROTECTED_TERMS,
+    containsProtectedTerm,
+    restoreCanonicalBrandTerms,
+    protectTermsInText,
+    restoreProtectedTerms,
+} from "../search/protected_terms.js";
+
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
 const isEmpty = (value) => {
     if (value === null || value === undefined) return true;
@@ -597,42 +606,8 @@ export const rankSimilarRows = async (rows, search, threshold = 0, topN = null) 
 };
 
 
-// Common medical/brand words you don't want translated
-const SAFE_TERMS = [
-    "Fotona", "Hydrafacial", "Lumenis", "Candela", "Cynosure", "Restylane",
-    "Juvederm", "Botox", "Belotero", "Dysport", "Allergan", "HIFU", "Laser", "Clinic",
-    "Morpheus8", "Clarity II", "ND:YAG", "Emsella", "Profhilo", "Dermapen", "PRP"
-];
-
 function containsSafeTerm(text) {
-    return SAFE_TERMS.some(term => text.toLowerCase().includes(term.toLowerCase()));
-}
-
-function protectSafeTerms(text) {
-    if (!text) return { protectedText: text, map: [] };
-
-    let protectedText = text;
-    const map = [];
-
-    SAFE_TERMS.forEach((term, idx) => {
-        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const token = `__SAFE_TERM_${idx}__`;
-        const re = new RegExp(`\\b${escaped}\\b`, "gi");
-        if (re.test(protectedText)) {
-            protectedText = protectedText.replace(re, token);
-            map.push({ token, term });
-        }
-    });
-
-    return { protectedText, map };
-}
-
-function restoreSafeTerms(text, map = []) {
-    let restored = text;
-    map.forEach(({ token, term }) => {
-        restored = restored.replace(new RegExp(token, "g"), term);
-    });
-    return restored;
+    return containsProtectedTerm(text);
 }
 
 export async function translator(question, targetLang = "en") {
@@ -654,7 +629,7 @@ export async function translator(question, targetLang = "en") {
 
         // 🌍 Step 3: Only translate if it’s Swedish or other non-English
         if (["sv", "da", "no", "de", "fr", "it", "es"].includes(detectedLang)) {
-            const { protectedText, map } = protectSafeTerms(question);
+            const { protectedText, map } = protectTermsInText(question);
             const translateUrl = `https://translation.googleapis.com/language/translate/v2?key=${GOOGLE_TRANSLATE_KEY}`;
             const resp = await axios.post(translateUrl, {
                 q: protectedText,
@@ -663,7 +638,7 @@ export async function translator(question, targetLang = "en") {
             });
 
             const translatedRaw = resp.data.data.translations[0].translatedText;
-            const translated = restoreSafeTerms(translatedRaw, map);
+            const translated = restoreProtectedTerms(translatedRaw, map);
             console.log(`Translated (${detectedLang} → ${targetLang}): '${question}' → '${translated}'`);
             return translated;
         }
@@ -679,7 +654,7 @@ export async function translator(question, targetLang = "en") {
 // 🧠 Only skip if text *is exactly or mostly* a brand name, not if it just contains one
 function shouldSkipTranslation(text) {
     const lowerText = text.toLowerCase().trim();
-    return SAFE_TERMS.some(term => {
+    return PROTECTED_TERMS.some(term => {
         const lowerTerm = term.toLowerCase();
         return (
             lowerText === lowerTerm || // exact match
@@ -719,6 +694,13 @@ export const applyLanguageOverwrite = (data, lang = "en") => {
           newObj[keyBase] = newObj[svKey];
         }
       });
+
+      // Keep protected brand/device names canonical after language overwrite.
+      for (const key in newObj) {
+        if (typeof newObj[key] === "string") {
+          newObj[key] = restoreCanonicalBrandTerms(newObj[key]);
+        }
+      }
 
       return newObj;
     }
