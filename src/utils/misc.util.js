@@ -6,6 +6,7 @@ import { sendEmail } from "../services/send_email.js";
 import { cosineSimilarity } from "./user_helper.js";
 import axios from "axios";
 import OpenAI from "openai";
+import { googleTranslator } from "./user_helper.js";
 import {
     PROTECTED_TERMS,
     containsProtectedTerm,
@@ -648,6 +649,24 @@ export async function translator(question, targetLang = "en") {
     } catch (err) {
         console.error("Translate error:", err.response?.data || err.message);
         return question;
+    }
+}
+
+export async function localizeTextValue(value, language = "en") {
+    if (value === null || value === undefined) return value;
+    const text = typeof value === "string" ? value.trim() : String(value);
+    if (!text) return value;
+
+    try {
+        const target = String(language || "en").toLowerCase();
+        const translated = target === "sv"
+            ? await googleTranslator(text, "sv")
+            : await translator(text, "en");
+
+        return restoreCanonicalBrandTerms(translated);
+    } catch (error) {
+        console.error("localizeTextValue error:", error?.response?.data || error?.message || error);
+        return value;
     }
 }
 

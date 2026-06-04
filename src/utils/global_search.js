@@ -6,6 +6,7 @@ import { cosineSimilarity } from "./user_helper.js";
 import axios from "axios";
 import OpenAI from "openai";
 import dotenv from "dotenv";
+import { localizeTextValue } from "./misc.util.js";
 import {
   parseSearchIntent,
   normalizeSearchText,
@@ -97,6 +98,49 @@ function canonicalizeBrandText(value = "") {
 
 function renderEntityName(canonical = "", localized = "", options = {}) {
   return resolveProtectedDisplayName(canonical, localized, options);
+}
+
+async function localizeTreatmentResult(result = {}, language = "en") {
+  const lang = String(language || "en").toLowerCase();
+  const baseName = result.name || result.swedish || "";
+  const baseDescription = result.description_en || result.description_sv || result.description || "";
+  const baseBenefits = result.benefits_en || result.benefits_sv || result.benefits || "";
+  const baseDeviceName = result.device_name || result.device_name_swedish || "";
+  const baseLikeWiseTerms = result.like_wise_terms || result.like_wise_terms_swedish || "";
+  const baseTreatmentName = result.treatment_name || result.treatment_swedish || "";
+
+  const [nameEn, nameSv, descriptionEn, descriptionSv, benefitsEn, benefitsSv, deviceNameEn, deviceNameSv, likeWiseEn, likeWiseSv, treatmentNameEn, treatmentNameSv] = await Promise.all([
+    localizeTextValue(baseName, "en"),
+    localizeTextValue(baseName, "sv"),
+    localizeTextValue(baseDescription, "en"),
+    localizeTextValue(baseDescription, "sv"),
+    localizeTextValue(baseBenefits, "en"),
+    localizeTextValue(baseBenefits, "sv"),
+    localizeTextValue(baseDeviceName, "en"),
+    localizeTextValue(baseDeviceName, "sv"),
+    localizeTextValue(baseLikeWiseTerms, "en"),
+    localizeTextValue(baseLikeWiseTerms, "sv"),
+    localizeTextValue(baseTreatmentName, "en"),
+    localizeTextValue(baseTreatmentName, "sv")
+  ]);
+
+  return {
+    ...result,
+    name: lang === "sv" ? nameSv : nameEn,
+    swedish: nameSv,
+    description_en: descriptionEn,
+    description_sv: descriptionSv,
+    benefits_en: benefitsEn,
+    benefits_sv: benefitsSv,
+    device_name: lang === "sv" ? deviceNameSv : deviceNameEn,
+    device_name_swedish: deviceNameSv,
+    like_wise_terms: lang === "sv" ? likeWiseSv : likeWiseEn,
+    like_wise_terms_swedish: likeWiseSv,
+    treatment_name: lang === "sv" ? treatmentNameSv : treatmentNameEn,
+    treatment_swedish: treatmentNameSv,
+    description: lang === "sv" ? descriptionSv : descriptionEn,
+    benefits: lang === "sv" ? benefitsSv : benefitsEn
+  };
 }
 
 function includesPhrase(haystack, phrase) {
@@ -391,20 +435,9 @@ export const getTreatmentsAIResult = async (
   if (cachedRankings?.length) {
     const cachedResolved = resolveCachedTreatmentRows(rows, cachedRankings);
 
-    const translatedFromCache = cachedResolved.map((result) => ({
-      ...result,
-      name: language === "en"
-        ? canonicalizeBrandText(result.name)
-        : renderEntityName(result.name, result.swedish),
-      benefits: language === "en" ? result.benefits_en : result.benefits_sv,
-      like_wise_terms: canonicalizeBrandText(language === "en"
-        ? result.like_wise_terms
-        : (result.like_wise_terms_swedish || result.like_wise_terms)),
-      device_name: canonicalizeBrandText(language === "en"
-        ? result.device_name
-        : (result.device_name_swedish || result.device_name)),
-      description: language === "en" ? result.description_en : result.description_sv
-    }));
+    const translatedFromCache = await Promise.all(
+      cachedResolved.map((result) => localizeTreatmentResult(result, language))
+    );
 
     const cachedOutput = debugEnabled
       ? translatedFromCache.map((result) => ({
@@ -438,20 +471,9 @@ export const getTreatmentsAIResult = async (
     const warmedRankings = getCachedTreatmentRankings(cacheKey);
     if (warmedRankings?.length) {
       const warmedResolved = resolveCachedTreatmentRows(rows, warmedRankings);
-      const translatedWarmed = warmedResolved.map((result) => ({
-        ...result,
-        name: language === "en"
-          ? canonicalizeBrandText(result.name)
-          : renderEntityName(result.name, result.swedish),
-        benefits: language === "en" ? result.benefits_en : result.benefits_sv,
-        like_wise_terms: canonicalizeBrandText(language === "en"
-          ? result.like_wise_terms
-          : (result.like_wise_terms_swedish || result.like_wise_terms)),
-        device_name: canonicalizeBrandText(language === "en"
-          ? result.device_name
-          : (result.device_name_swedish || result.device_name)),
-        description: language === "en" ? result.description_en : result.description_sv
-      }));
+      const translatedWarmed = await Promise.all(
+        warmedResolved.map((result) => localizeTreatmentResult(result, language))
+      );
 
       const warmedOutput = debugEnabled
         ? translatedWarmed.map((result) => ({
@@ -619,22 +641,9 @@ export const getTreatmentsAIResult = async (
     }
   }
 
-  const translated = filtered.map(result => ({
-    ...result,
-    name: language === "en"
-      ? canonicalizeBrandText(result.name)
-      : renderEntityName(result.name, result.swedish),
-    benefits: language === "en" ? result.benefits_en : result.benefits_sv,
-    like_wise_terms: canonicalizeBrandText(language === "en"
-      ? result.like_wise_terms
-      : (result.like_wise_terms_swedish || result.like_wise_terms)),
-    device_name: canonicalizeBrandText(language === "en"
-      ? result.device_name
-      : (result.device_name_swedish || result.device_name)),
-    description: language === "en"
-      ? result.description_en
-      : result.description_sv
-  }));
+  const translated = await Promise.all(
+    filtered.map((result) => localizeTreatmentResult(result, language))
+  );
 
   if (debugEnabled) {
     return translated.map((result) => ({
@@ -722,15 +731,11 @@ export const getSubTreatmentsAIResult = async (
     .sort((a, b) => b.final_score - a.final_score);
 
   // ----- Step 5: Translate if needed -----
-  const translated = filtered.map(r => ({
+  const translated = await Promise.all(filtered.map(async (r) => ({
     ...r,
-    name: language === "en"
-      ? canonicalizeBrandText(r.name)
-      : renderEntityName(r.name, r.swedish),
-    treatment_name: language === "en"
-      ? canonicalizeBrandText(r.treatment_name)
-      : renderEntityName(r.treatment_name, r.treatment_swedish),
-  }));
+    name: await localizeTextValue(r.name || r.swedish || "", language),
+    treatment_name: await localizeTextValue(r.treatment_name || r.treatment_swedish || "", language),
+  })));
 
   // ----- Step 6: Limit top N if requested -----
   return topN ? translated.slice(0, topN) : translated;
