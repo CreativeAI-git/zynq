@@ -661,7 +661,7 @@ export async function localizeTextValue(value, language = "en") {
         const target = String(language || "en").toLowerCase();
         const translated = target === "sv"
             ? await googleTranslator(text, "sv")
-            : await translator(text, "en");
+            : await googleTranslator(text, "en");
 
         return restoreCanonicalBrandTerms(translated);
     } catch (error) {
