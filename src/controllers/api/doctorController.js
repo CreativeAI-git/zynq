@@ -89,6 +89,31 @@ async function localizeClinicSearchResult(clinic = {}, language = "en") {
     };
 }
 
+async function localizeDeviceSearchResult(device = {}, language = "en") {
+    return {
+        ...device,
+        device_name: await localizeTextValue(device.device_name || device.device_swedish || "", language),
+        device_swedish: await localizeTextValue(device.device_swedish || device.device_name || "", "sv"),
+        treatment_name: await localizeTextValue(device.treatment_name || device.treatment_swedish || "", language),
+        treatment_swedish: await localizeTextValue(device.treatment_swedish || device.treatment_name || "", "sv"),
+        associated_treatments: await Promise.all((device.associated_treatments || []).map(async (treatment) => ({
+            ...treatment,
+            name: await localizeTextValue(treatment?.name || treatment?.swedish || "", language),
+            swedish: await localizeTextValue(treatment?.swedish || treatment?.name || "", "sv"),
+        })))
+    };
+}
+
+async function localizeSubTreatmentSearchResult(subTreatment = {}, language = "en") {
+    return {
+        ...subTreatment,
+        name: await localizeTextValue(subTreatment.name || subTreatment.swedish || "", language),
+        swedish: await localizeTextValue(subTreatment.swedish || subTreatment.name || "", "sv"),
+        treatment_name: await localizeTextValue(subTreatment.treatment_name || subTreatment.treatment_swedish || "", language),
+        treatment_swedish: await localizeTextValue(subTreatment.treatment_swedish || subTreatment.treatment_name || "", "sv")
+    };
+}
+
 
 
 const APP_URL = process.env.APP_URL;
@@ -1136,8 +1161,12 @@ export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res
 
 
 
+        const localizedDevices = await Promise.all(
+            devices.map((device) => localizeDeviceSearchResult(device, language))
+        );
+
         // 5️⃣ Return ranked response
-        return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', devices);
+        return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', localizedDevices);
 
     } catch (error) {
         console.error("Search Home Error:", error);
@@ -1315,8 +1344,12 @@ export const getSubtreatmentsBySearchOnlyController = asyncHandler(async (req, r
             relatedDefaultPriority: 2
         });
 
+        const localizedSubTreatments = await Promise.all(
+            mergedSubTreatments.map((subTreatment) => localizeSubTreatmentSearchResult(subTreatment, language))
+        );
+
         // 5️⃣ Return ranked response
-        return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', mergedSubTreatments);
+        return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', localizedSubTreatments);
 
     } catch (error) {
         console.error("Search Home Error:", error);
