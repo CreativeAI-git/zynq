@@ -84,6 +84,18 @@ import path from 'path';
 import fs from 'fs';
 import { applyLanguageOverwrite } from "../../utils/misc.util.js";
 
+const translateStoredTextPair = async (text) => {
+    const normalizedText = typeof text === "string" ? text.trim() : text;
+    if (!normalizedText) {
+        return { en: normalizedText, sv: normalizedText };
+    }
+
+    return {
+        en: await googleTranslator(normalizedText, "en"),
+        sv: await googleTranslator(normalizedText, "sv"),
+    };
+};
+
 export const getTreatmentsByConcern = asyncHandler(async (req, res) => {
     const { concern_id } = req.params;
     const treatmentsData = await getTreatmentsByConcernId(concern_id);
@@ -98,9 +110,16 @@ export const addEditTreatment = asyncHandler(async (req, res) => {
     const language = req.user?.language || 'en';
     const isAdmin = role === "ADMIN";
     const dbData = { ...body };
-    dbData.swedish = await googleTranslator(dbData.name, "sv");
-    // dbData.benefits_sv = await googleTranslator(dbData.benefits_en, "sv");
-    dbData.description_sv = await googleTranslator(dbData.description_en, "sv");
+    delete dbData.language;
+
+    const translatedName = await translateStoredTextPair(dbData.name);
+    dbData.name = translatedName.en;
+    dbData.swedish = translatedName.sv;
+
+    const descriptionSource = dbData.description_en || dbData.description_sv || "";
+    const translatedDescription = await translateStoredTextPair(descriptionSource);
+    dbData.description_en = translatedDescription.en;
+    dbData.description_sv = translatedDescription.sv;
 
 
     const benefits_ids = dbData.benefits_ids;
@@ -263,7 +282,11 @@ export const addEditSubtreatment = asyncHandler(async (req, res) => {
     const isAdmin = role === "ADMIN";
 
     const dbData = { ...body };
-    dbData.swedish = await googleTranslator(dbData.name, "sv");
+    delete dbData.language;
+
+    const translatedName = await translateStoredTextPair(dbData.name);
+    dbData.name = translatedName.en;
+    dbData.swedish = translatedName.sv;
 
     // 🧩 Creator metadata
     if (isAdmin) {
@@ -357,9 +380,12 @@ export const addEditSubTreatmentMaster = asyncHandler(async (req, res) => {
     const isAdmin = role === "ADMIN";
 
     let dbData = { ...body };
+    delete dbData.language;
 
-    // 🌍 Auto translate name → Swedish
-    dbData.swedish = await googleTranslator(dbData.name, "sv");
+    // 🌍 Store both English and Swedish versions from the same submitted text
+    const translatedName = await translateStoredTextPair(dbData.name);
+    dbData.name = translatedName.en;
+    dbData.swedish = translatedName.sv;
 
     // 🔐 Set creator & approval logic
     if (isAdmin) {
@@ -648,7 +674,11 @@ export const addEditConcern = asyncHandler(async (req, res) => {
     const isAdmin = role === "ADMIN";
     let dbData = { ...body };
 
-    dbData.swedish = await googleTranslator(dbData.name, "sv");
+    delete dbData.language;
+
+    const translatedName = await translateStoredTextPair(dbData.name);
+    dbData.name = translatedName.en;
+    dbData.swedish = translatedName.sv;
 
     // 🧩 Metadata
     if (isAdmin) {
@@ -1010,7 +1040,11 @@ export const addEditLikeWiseTerms = asyncHandler(async (req, res) => {
     const isAdmin = role === "ADMIN";
     let dbData = { ...body };
 
-    dbData.swedish = await googleTranslator(dbData.name, "sv");
+    delete dbData.language;
+
+    const translatedName = await translateStoredTextPair(dbData.name);
+    dbData.name = translatedName.en;
+    dbData.swedish = translatedName.sv;
 
     // 🧩 Metadata
     if (isAdmin) {
@@ -1120,7 +1154,11 @@ export const addEditDevice = asyncHandler(async (req, res) => {
     const isAdmin = role === "ADMIN";
     let dbData = { ...body };
 
-    dbData.swedish = await googleTranslator(dbData.name, "sv");
+    delete dbData.language;
+
+    const translatedName = await translateStoredTextPair(dbData.name);
+    dbData.name = translatedName.en;
+    dbData.swedish = translatedName.sv;
 
     // 🧩 Metadata
     if (isAdmin) {
@@ -1232,7 +1270,12 @@ export const addEditBenefit = asyncHandler(async (req, res) => {
     const isAdmin = role === "ADMIN";
     let dbData = { ...body };
 
-    dbData.swedish = await googleTranslator(dbData.name, "sv");
+    const inputLanguage = String(dbData.language || language || "en").toLowerCase();
+    delete dbData.language;
+
+    const translatedName = await translateStoredTextPair(dbData.name, inputLanguage);
+    dbData.name = translatedName.en;
+    dbData.swedish = translatedName.sv;
 
     // 🧩 Metadata
     if (isAdmin) {
