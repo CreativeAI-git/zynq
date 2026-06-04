@@ -10,7 +10,7 @@ import { asyncHandler, handleError, handleSuccess, joiErrorHandle } from "../../
 import { formatImagePath, generateAccessToken, generatePassword, generateVerificationLink } from "../../utils/user_helper.js";
 import { fileURLToPath } from 'url';
 import { fetchChatById, getChatBetweenUsers } from "../../models/chat.js";
-import { formatBenefitsUnified, getTreatmentIDsByUserID } from "../../utils/misc.util.js";
+import { formatBenefitsUnified, getTreatmentIDsByUserID, localizeTextValue } from "../../utils/misc.util.js";
 import { openai } from "../../../app.js";
 import { translator } from "../../utils/misc.util.js";
 import { mergeGraphAwareResults } from "../../utils/search_graph.util.js";
@@ -65,6 +65,28 @@ export function isGibberishText(text = "") {
 
     // Otherwise treat as valid
     return false;
+}
+
+async function localizeDoctorSearchResult(doctor = {}, language = "en") {
+    return {
+        ...doctor,
+        profile_image: formatImagePath(doctor.profile_image, 'doctor/profile_images'),
+        skin_types: await localizeTextValue(doctor.skin_types_swedish || doctor.skin_types || "", language),
+        skin_types_swedish: await localizeTextValue(doctor.skin_types_swedish || doctor.skin_types || "", "sv"),
+    };
+}
+
+async function localizeClinicSearchResult(clinic = {}, language = "en") {
+    return {
+        ...clinic,
+        clinic_logo: formatImagePath(clinic.clinic_logo, 'clinic/logo'),
+        clinic_name: await localizeTextValue(clinic.clinic_name || "", language),
+        treatments: await Promise.all((clinic.treatments || []).map(async (treatment) => ({
+            ...treatment,
+            name: await localizeTextValue(treatment?.name || treatment?.swedish || "", language),
+            swedish: await localizeTextValue(treatment?.swedish || treatment?.name || "", "sv"),
+        })))
+    };
 }
 
 
@@ -1006,12 +1028,10 @@ export const getDoctorsByFirstNameSearchOnlyController = asyncHandler(async (req
         ]);
 
 
-        // 3️⃣ Enrich images (same as your code)
-        const enrichedDoctors = doctors.map(({ embeddings, ...doctor }) => ({
-            ...doctor,
-            profile_image: formatImagePath(doctor.profile_image, 'doctor/profile_images'),
-            skin_types: language === 'en' ? doctor.skin_types : doctor.skin_types_swedish,
-        }));
+        // 3️⃣ Enrich and localize the final response without changing shape
+        const enrichedDoctors = await Promise.all(
+            doctors.map(({ embeddings, ...doctor }) => localizeDoctorSearchResult(doctor, language))
+        );
 
 
         // 5️⃣ Return ranked response
@@ -1061,12 +1081,10 @@ export const getClinicsByNameSearchOnlyController = asyncHandler(async (req, res
         ]);
 
 
-        // 3️⃣ Enrich images (same as your code)
-        const enrichedClinics = clinics.map(clinic => ({
-            ...clinic,
-            clinic_logo: formatImagePath(clinic.clinic_logo, 'clinic/logo'),
-            treatments: clinic.treatments.map(treatment => language == "en" ? treatment.name : treatment.swedish)
-        }));
+        // 3️⃣ Enrich and localize the final response without changing shape
+        const enrichedClinics = await Promise.all(
+            clinics.map((clinic) => localizeClinicSearchResult(clinic, language))
+        );
 
 
         // 5️⃣ Return ranked response
