@@ -572,6 +572,23 @@ export const getTreatmentsAIResult = async (
       filtered = filtered.slice(0, adaptiveCap);
     }
 
+    // Safety net: if the stricter ranking stack produces nothing, fall back to
+    // obvious lexical matches so exact treatment names still surface.
+    if (!filtered.length) {
+      filtered = scored
+        .filter((r) =>
+          r._exactMatch ||
+          r._lexicalScore >= 0.72 ||
+          includesPhrase(r._matchText, queryInfo.normalized)
+        )
+        .sort(treatmentTieBreaker)
+        .map((r) => ({
+          ...r,
+          is_fallback: true,
+          match_stage: "direct_lexical_fallback"
+        }));
+    }
+
     setCachedTreatmentRankings(
       cacheKey,
       filtered.map((r) => ({

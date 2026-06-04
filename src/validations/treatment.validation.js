@@ -60,6 +60,7 @@ export const addAppointmentDraftSchema = joi.object({
 
 export const addEditTreatmentSchema = joi.object({
   treatment_id: stringValidation.optional(),
+  language: joi.string().valid("en", "sv").optional().allow("", null),
   name: stringValidation,
   // swedish: stringValidation,
   classification_type: stringValidation.valid('Medical', 'Non-Medical'),
@@ -79,12 +80,14 @@ export const addEditTreatmentSchema = joi.object({
 export const addEditSubtreatmentSchema = joi.object({
   treatment_id: stringValidation.optional(),
   sub_treatment_id: stringValidation.optional(),
+  language: joi.string().valid("en", "sv").optional().allow("", null),
   name: stringValidation,
   swedish: stringValidation.optional()
 })
 
 export const addEditSubtreatmentMasterSchema = joi.object({
   sub_treatment_id: stringValidation.optional(),
+  language: joi.string().valid("en", "sv").optional().allow("", null),
   name: stringValidation,
   swedish: stringValidation.optional()
 })
@@ -104,6 +107,7 @@ export const updateTreatmentApprovalStatusSchema = joi.object({
 
 export const addEditConcernSchema = joi.object({
   concern_id: stringValidation.optional(),
+  language: joi.string().valid("en", "sv").optional().allow("", null),
   name: stringValidation,
   swedish: stringValidation.optional(),
 });
@@ -120,6 +124,7 @@ export const updateConcernApprovalStatusSchema = joi.object({
 
 export const addEditLikeWiseSchema = joi.object({
   like_wise_term_id : stringValidation.optional(),
+  language: joi.string().valid("en", "sv").optional().allow("", null),
   name: stringValidation,
   swedish: stringValidation.optional(),
 });
@@ -136,6 +141,7 @@ export const updateLikeWiseApprovalStatusSchema = joi.object({
 
 export const addEditBenefitsSchema = joi.object({
   benefit_id : stringValidation.optional(),
+  language: joi.string().valid("en", "sv").optional().allow("", null),
   name: stringValidation,
   swedish: stringValidation.optional(),
 });
@@ -151,6 +157,7 @@ export const updateBenefitsApprovalStatusSchema = joi.object({
 
 export const addEditDevicesSchema = joi.object({
   device_id : stringValidation.optional(),
+  language: joi.string().valid("en", "sv").optional().allow("", null),
   name: stringValidation,
   swedish: stringValidation.optional(),
 });
