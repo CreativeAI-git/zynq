@@ -68,11 +68,19 @@ export function isGibberishText(text = "") {
 }
 
 async function localizeDoctorSearchResult(doctor = {}, language = "en") {
+    const baseSkinTypes = doctor.skin_types_swedish || doctor.skin_types || "";
+    const localizedSkinTypes = baseSkinTypes
+        ? await localizeTextValue(baseSkinTypes, language)
+        : null;
+    const localizedSkinTypesSv = baseSkinTypes
+        ? await localizeTextValue(baseSkinTypes, "sv")
+        : null;
+
     return {
         ...doctor,
         profile_image: formatImagePath(doctor.profile_image, 'doctor/profile_images'),
-        skin_types: await localizeTextValue(doctor.skin_types_swedish || doctor.skin_types || "", language),
-        skin_types_swedish: await localizeTextValue(doctor.skin_types_swedish || doctor.skin_types || "", "sv"),
+        skin_types: localizedSkinTypes,
+        skin_types_swedish: localizedSkinTypesSv,
     };
 }
 

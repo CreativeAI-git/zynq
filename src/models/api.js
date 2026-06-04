@@ -3120,22 +3120,26 @@ export const getDoctorsByFirstNameSearchOnly = async ({ search = '', page = null
                     WHERE tdum.zynq_user_id = d.zynq_user_id AND tdum.clinic_id = c.clinic_id
                 ) AS devices_swedish,
 
-                 (
-                    SELECT GROUP_CONCAT(tst.English ORDER BY tst.English SEPARATOR ', ')
+                (
+                    SELECT GROUP_CONCAT(
+                        COALESCE(tst.name, tst.English)
+                        ORDER BY COALESCE(tst.name, tst.English)
+                        SEPARATOR ', '
+                    )
                     FROM tbl_doctor_skin_types dst
-                    JOIN tbl_skin_types   tst ON 
-                    dst.skin_type_id = tst.skin_type_id
-                    WHERE 
-                dst.doctor_id = d.doctor_id AND dst.clinic_id = c.clinic_id
+                    JOIN tbl_skin_types tst ON dst.skin_type_id = tst.skin_type_id
+                    WHERE dst.doctor_id = d.doctor_id AND dst.clinic_id = c.clinic_id
                 ) AS skin_types,
 
                 (
-                    SELECT GROUP_CONCAT(tst.Swedish ORDER BY tst.Swedish SEPARATOR ', ')
+                    SELECT GROUP_CONCAT(
+                        COALESCE(tst.swedish, tst.Swedish)
+                        ORDER BY COALESCE(tst.swedish, tst.Swedish)
+                        SEPARATOR ', '
+                    )
                     FROM tbl_doctor_skin_types dst
-                    JOIN tbl_skin_types   tst ON 
-                    dst.skin_type_id = tst.skin_type_id
-                    WHERE 
-                dst.doctor_id = d.doctor_id AND dst.clinic_id = c.clinic_id
+                    JOIN tbl_skin_types tst ON dst.skin_type_id = tst.skin_type_id
+                    WHERE dst.doctor_id = d.doctor_id AND dst.clinic_id = c.clinic_id
                 ) AS skin_types_swedish
 
                 FROM tbl_doctors d
