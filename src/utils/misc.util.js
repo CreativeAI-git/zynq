@@ -11,8 +11,6 @@ import {
     PROTECTED_TERMS,
     containsProtectedTerm,
     restoreCanonicalBrandTerms,
-    protectTermsInText,
-    restoreProtectedTerms,
 } from "../search/protected_terms.js";
 
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
@@ -629,17 +627,13 @@ export async function translator(question, targetLang = "en") {
         //   }
 
         // 🌍 Step 3: Only translate if it’s Swedish or other non-English
+        // ⚠️  DO NOT manually call protectTermsInText/restoreProtectedTerms here.
+        //     googleTranslator() already does that internally.
+        //     Double-protecting causes tokens like __protected_term_0__ to reach
+        //     Google Translate and come back as __skyddad_term_0__ (Swedish for
+        //     "protected"), which then leaks into the UI unchanged.
         if (["sv", "da", "no", "de", "fr", "it", "es"].includes(detectedLang)) {
-            const { protectedText, map } = protectTermsInText(question);
-            const translateUrl = `https://translation.googleapis.com/language/translate/v2?key=${GOOGLE_TRANSLATE_KEY}`;
-            const resp = await axios.post(translateUrl, {
-                q: protectedText,
-                target: targetLang,
-                format: "text"
-            });
-
-            const translatedRaw = resp.data.data.translations[0].translatedText;
-            const translated = restoreProtectedTerms(translatedRaw, map);
+            const translated = await googleTranslator(question, targetLang);
             console.log(`Translated (${detectedLang} → ${targetLang}): '${question}' → '${translated}'`);
             return translated;
         }
