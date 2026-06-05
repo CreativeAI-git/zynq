@@ -87,7 +87,7 @@ export function protectTermsInText(text = "") {
     // Use an opaque token so the translation engine does not try to localize it.
     // Keep the token lowercase-safe because normalization lowercases text before restore.
     // const token = `__qz_${idx}_${Math.random().toString(36).slice(2, 8)}__`;
-    const token = `__protected_term_${idx}__`;
+    const token = `__pt${idx}__`;
     const re = new RegExp(`\\b${escapeRegex(term)}\\b`, "gi");
     if (re.test(protectedText)) {
       protectedText = protectedText.replace(re, token);
