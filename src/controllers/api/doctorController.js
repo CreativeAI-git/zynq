@@ -99,32 +99,45 @@ async function localizeClinicSearchResult(clinic = {}, language = "en") {
 }
 
 async function localizeDeviceSearchResult(device = {}, language = "en") {
+    // device_name is a single brand name — protect it from translation
     const baseDeviceName = device.device_name || device.device_swedish || "";
+
+    // treatment_name may be a GROUP_CONCAT comma-separated string like "Laser,Botox,IPL"
+    // Split → localize each → rejoin
+    const localizeCommaSeparated = async (str, lang) => {
+        if (!str) return str;
+        const parts = String(str).split(",").map(s => s.trim()).filter(Boolean);
+        const localized = await Promise.all(parts.map(p => localizeTextValue(p, lang)));
+        return localized.join(", ");
+    };
+
     const baseTreatmentName = device.treatment_name || device.treatment_swedish || "";
-    const deviceNameEn = await localizeTextValue(baseDeviceName, "en");
-    const deviceNameSv = await localizeTextValue(baseDeviceName, "sv");
-    const treatmentNameEn = await localizeTextValue(baseTreatmentName, "en");
-    const treatmentNameSv = await localizeTextValue(baseTreatmentName, "sv");
+    const baseTreatmentSwedish = device.treatment_swedish || device.treatment_name || "";
+
+    const [treatmentNameLocalized, treatmentSwedishLocalized] = await Promise.all([
+        localizeCommaSeparated(baseTreatmentName, language),
+        localizeCommaSeparated(baseTreatmentSwedish, "sv")
+    ]);
 
     return {
         ...device,
-        device_name: resolveProtectedDisplayName(baseDeviceName, language === "sv" ? deviceNameSv : deviceNameEn),
-        device_swedish: resolveProtectedDisplayName(baseDeviceName, deviceNameSv),
-        treatment_name: resolveProtectedDisplayName(baseTreatmentName, language === "sv" ? treatmentNameSv : treatmentNameEn),
-        treatment_swedish: resolveProtectedDisplayName(baseTreatmentName, treatmentNameSv),
-        associated_treatments: await Promise.all((device.associated_treatments || []).map(async (treatment) => ({
-            ...treatment,
-            name: resolveProtectedDisplayName(
-                treatment?.name || treatment?.swedish || "",
-                language === "sv"
-                    ? await localizeTextValue(treatment?.name || treatment?.swedish || "", "sv")
-                    : await localizeTextValue(treatment?.name || treatment?.swedish || "", "en")
-            ),
-            swedish: resolveProtectedDisplayName(
-                treatment?.name || treatment?.swedish || "",
-                await localizeTextValue(treatment?.name || treatment?.swedish || "", "sv")
-            ),
-        })))
+        // Device names are brand terms — preserve canonical casing, do NOT translate
+        device_name: resolveProtectedDisplayName(baseDeviceName, baseDeviceName),
+        device_swedish: resolveProtectedDisplayName(baseDeviceName, baseDeviceName),
+        treatment_name: treatmentNameLocalized,
+        treatment_swedish: treatmentSwedishLocalized,
+        associated_treatments: await Promise.all((device.associated_treatments || []).map(async (treatment) => {
+            const base = treatment?.name || treatment?.swedish || "";
+            const [localizedName, localizedSwedish] = await Promise.all([
+                localizeTextValue(base, language),
+                localizeTextValue(treatment?.swedish || base, "sv")
+            ]);
+            return {
+                ...treatment,
+                name: resolveProtectedDisplayName(base, localizedName),
+                swedish: resolveProtectedDisplayName(base, localizedSwedish)
+            };
+        }))
     };
 }
 
@@ -673,8 +686,8 @@ export const search_home_entities = asyncHandler(async (req, res) => {
             minRelationshipStrength: 0.68
         });
 
-        // Relationship expansion enriches services/treatments, not device section.
-        const mergedDevices = mergeGraphAwareResults(typedPrimaryDevices.accepted, [], {
+        // Relationship expansion enriches the device section too (e.g. searching "laser" → laser-linked devices)
+        const mergedDevices = mergeGraphAwareResults(typedPrimaryDevices.accepted, typedRelationDevices.accepted || [], {
             keySelector: (row) => row?.id || `${row?.device_id || ""}:${row?.treatment_id || ""}`,
             nameSelector: (row) => row?.device_name || "",
             scoreSelector: (row) => row?.final_score ?? row?.score ?? 0,
