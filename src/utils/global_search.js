@@ -126,18 +126,18 @@ async function localizeTreatmentResult(result = {}, language = "en") {
 
   return {
     ...result,
-    name: lang === "sv" ? nameSv : nameEn,
-    swedish: nameSv,
+    name: renderEntityName(nameEn, nameSv),
+    swedish: renderEntityName(nameEn, nameSv),
     description_en: descriptionEn,
     description_sv: descriptionSv,
     benefits_en: benefitsEn,
     benefits_sv: benefitsSv,
-    device_name: lang === "sv" ? deviceNameSv : deviceNameEn,
-    device_name_swedish: deviceNameSv,
-    like_wise_terms: lang === "sv" ? likeWiseSv : likeWiseEn,
-    like_wise_terms_swedish: likeWiseSv,
-    treatment_name: lang === "sv" ? treatmentNameSv : treatmentNameEn,
-    treatment_swedish: treatmentNameSv,
+    device_name: renderEntityName(deviceNameEn, deviceNameSv),
+    device_name_swedish: renderEntityName(deviceNameEn, deviceNameSv),
+    like_wise_terms: renderEntityName(likeWiseEn, likeWiseSv),
+    like_wise_terms_swedish: renderEntityName(likeWiseEn, likeWiseSv),
+    treatment_name: renderEntityName(treatmentNameEn, treatmentNameSv),
+    treatment_swedish: renderEntityName(treatmentNameEn, treatmentNameSv),
     description: lang === "sv" ? descriptionSv : descriptionEn,
     benefits: lang === "sv" ? benefitsSv : benefitsEn
   };

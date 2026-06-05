@@ -17,6 +17,7 @@ import { mergeGraphAwareResults } from "../../utils/search_graph.util.js";
 import { parseSearchIntent } from "../../search/intent_taxonomy.js";
 import { enforceDeviceSectionCandidates } from "../../search/typed_sections.js";
 import { containsProtectedTerm } from "../../search/protected_terms.js";
+import { resolveProtectedDisplayName } from "../../search/protected_terms.js";
 
 
 /**
@@ -98,16 +99,31 @@ async function localizeClinicSearchResult(clinic = {}, language = "en") {
 }
 
 async function localizeDeviceSearchResult(device = {}, language = "en") {
+    const baseDeviceName = device.device_name || device.device_swedish || "";
+    const baseTreatmentName = device.treatment_name || device.treatment_swedish || "";
+    const deviceNameEn = await localizeTextValue(baseDeviceName, "en");
+    const deviceNameSv = await localizeTextValue(baseDeviceName, "sv");
+    const treatmentNameEn = await localizeTextValue(baseTreatmentName, "en");
+    const treatmentNameSv = await localizeTextValue(baseTreatmentName, "sv");
+
     return {
         ...device,
-        device_name: await localizeTextValue(device.device_name || device.device_swedish || "", language),
-        device_swedish: await localizeTextValue(device.device_swedish || device.device_name || "", "sv"),
-        treatment_name: await localizeTextValue(device.treatment_name || device.treatment_swedish || "", language),
-        treatment_swedish: await localizeTextValue(device.treatment_swedish || device.treatment_name || "", "sv"),
+        device_name: resolveProtectedDisplayName(baseDeviceName, language === "sv" ? deviceNameSv : deviceNameEn),
+        device_swedish: resolveProtectedDisplayName(baseDeviceName, deviceNameSv),
+        treatment_name: resolveProtectedDisplayName(baseTreatmentName, language === "sv" ? treatmentNameSv : treatmentNameEn),
+        treatment_swedish: resolveProtectedDisplayName(baseTreatmentName, treatmentNameSv),
         associated_treatments: await Promise.all((device.associated_treatments || []).map(async (treatment) => ({
             ...treatment,
-            name: await localizeTextValue(treatment?.name || treatment?.swedish || "", language),
-            swedish: await localizeTextValue(treatment?.swedish || treatment?.name || "", "sv"),
+            name: resolveProtectedDisplayName(
+                treatment?.name || treatment?.swedish || "",
+                language === "sv"
+                    ? await localizeTextValue(treatment?.name || treatment?.swedish || "", "sv")
+                    : await localizeTextValue(treatment?.name || treatment?.swedish || "", "en")
+            ),
+            swedish: resolveProtectedDisplayName(
+                treatment?.name || treatment?.swedish || "",
+                await localizeTextValue(treatment?.name || treatment?.swedish || "", "sv")
+            ),
         })))
     };
 }
