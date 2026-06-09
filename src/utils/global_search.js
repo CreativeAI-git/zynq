@@ -159,18 +159,18 @@ async function localizeTreatmentResult(result = {}, language = "en") {
 
   return {
     ...result,
-    name: renderEntityName(nameEn, nameSv),
-    swedish: renderEntityName(nameEn, nameSv),
+    name: resolveProtectedDisplayName(nameEn, nameEn),
+    swedish: resolveProtectedDisplayName(nameSv, nameSv),
     description_en: descriptionEn,
     description_sv: descriptionSv,
     benefits_en: benefitsEn,
     benefits_sv: benefitsSv,
-    device_name: renderEntityName(deviceNameEn, deviceNameSv),
-    device_name_swedish: renderEntityName(deviceNameEn, deviceNameSv),
-    like_wise_terms: renderEntityName(likeWiseEn, likeWiseSv),
-    like_wise_terms_swedish: renderEntityName(likeWiseEn, likeWiseSv),
-    treatment_name: renderEntityName(treatmentNameEn, treatmentNameSv),
-    treatment_swedish: renderEntityName(treatmentNameEn, treatmentNameSv),
+    device_name: resolveProtectedDisplayName(deviceNameEn, deviceNameEn),
+    device_name_swedish: resolveProtectedDisplayName(deviceNameSv, deviceNameSv),
+    like_wise_terms: resolveProtectedDisplayName(likeWiseEn, likeWiseEn),
+    like_wise_terms_swedish: resolveProtectedDisplayName(likeWiseSv, likeWiseSv),
+    treatment_name: resolveProtectedDisplayName(treatmentNameEn, treatmentNameEn),
+    treatment_swedish: resolveProtectedDisplayName(treatmentNameSv, treatmentNameSv),
     description: lang === "sv" ? descriptionSv : descriptionEn,
     benefits: lang === "sv" ? benefitsSv : benefitsEn
   };
@@ -1461,10 +1461,10 @@ export const getDevicesAIResult = async (
 
   filtered = filtered.map((r) => ({
     ...r,
-    device_name: renderEntityName(r.device_name, r.device_swedish, { alwaysProtect: true }),
-    device_swedish: renderEntityName(r.device_name, r.device_swedish, { alwaysProtect: true }),
-    treatment_name: renderEntityName(r.treatment_name, r.treatment_swedish),
-    treatment_swedish: renderEntityName(r.treatment_name, r.treatment_swedish)
+    device_name: resolveProtectedDisplayName(r.device_name, r.device_name, { alwaysProtect: true }),
+    device_swedish: resolveProtectedDisplayName(r.device_swedish, r.device_swedish, { alwaysProtect: true }),
+    treatment_name: r.treatment_name,
+    treatment_swedish: r.treatment_swedish
   }));
 
   return topN ? filtered.slice(0, topN) : filtered;
