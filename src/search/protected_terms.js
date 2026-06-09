@@ -1,6 +1,9 @@
 import dotenv from "dotenv";
+import { createRequire } from "module";
 
 dotenv.config();
+
+const require = createRequire(import.meta.url);
 
 function parseJsonArrayEnv(rawValue) {
   if (!rawValue) return [];
@@ -21,17 +24,28 @@ function parseCsvEnv(rawValue) {
     .filter(Boolean);
 }
 
+function loadFileTerms() {
+  try {
+    const list = require("./protected_terms_list.json");
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
 function buildProtectedTerms() {
   const envJsonTerms = parseJsonArrayEnv(process.env.PROTECTED_TERMS_JSON);
   const envCsvTerms = parseCsvEnv(process.env.PROTECTED_TERMS_CSV);
+  const fileTerms = loadFileTerms();
   return Array.from(new Set(
-    [...envJsonTerms, ...envCsvTerms]
+    [...fileTerms, ...envJsonTerms, ...envCsvTerms]
       .map((term) => String(term || "").trim())
       .filter(Boolean)
   ));
 }
 
 export const PROTECTED_TERMS = buildProtectedTerms();
+console.log(`[search] PROTECTED_TERMS loaded: ${PROTECTED_TERMS.length} terms`);
 if (PROTECTED_TERMS.length === 0) {
   console.warn("[search] PROTECTED_TERMS is empty. Using dynamic protected-name detection.");
 }
@@ -53,8 +67,70 @@ const PROTECTED_ALIASES = (() => {
     });
   });
 
+  // Explicit translations or spelling variants (e.g. Swedish DB/Google Translate leaks) mapped to canonical brand names
+  const explicitAliases = {
+    "klarhet ii": "Clarity II",
+    "klarhet 2": "Clarity II",
+    "klarhet": "Clarity II",
+    "ikon": "Icoone",
+    "dioxin": "Dioxium",
+    "lasermd": "LaseMD",
+    "stjärnvandrare": "StarWalker",
+    "stjarnvandrare": "StarWalker",
+    "norrsken": "Nordlys",
+    "northern lights": "Nordlys",
+    "kandela": "Candela",
+    "asklepion": "Asclepion",
+    "kollaserpeeling": "CarbonPeel",
+    "koldioxidlaser-peel": "Carbon Laser Peel",
+    "ellips": "Ellipse"
+  };
+
+  Object.entries(explicitAliases).forEach(([alias, canonical]) => {
+    const lower = alias.toLowerCase();
+    const normalized = normalizeProtectedAlias(alias);
+    const compact = normalized.replace(/\s+/g, "");
+
+    [lower, normalized, compact].forEach((a) => {
+      if (!a) return;
+      aliasMap.set(a, canonical);
+    });
+  });
+
   return aliasMap;
 })();
+
+[
+  ["Clarity II", "Clarity II"],
+  ["Candela Nordlys", "Candela Nordlys"],
+  ["Icoone", "Icoone"],
+  ["Dioxium", "Dioxium"],
+  ["LaseMD", "LaseMD"],
+  ["Fotona StarWalker", "Fotona StarWalker"],
+  ["Foto Starwalker", "Fotona StarWalker"],
+  ["CarbonPeel", "CarbonPeel"],
+  ["Kollaserpeeling", "CarbonPeel"],
+  ["Asclepion", "Asclepion"],
+  ["Asklepion", "Asclepion"],
+  ["QuadroStarPRO Green", "QuadroStarPRO Green"],
+  ["ND:YAG", "ND:YAG"],
+  ["Nd:YAG", "ND:YAG"],
+  ["Ndyag", "ND:YAG"],
+  ["Mörka ringar", "dark circles"],
+  ["Morka ringar", "dark circles"],
+  ["dark circles", "dark circles"],
+  ["Under eye", "under eye"],
+  ["Under eyes", "under eye"],
+  ["Laserbehandling", "laser treatment"],
+  ["Laser behandling", "laser treatment"],
+  ["Laser pigmentering", "laser pigmentation"]
+].forEach(([alias, canonical]) => {
+  const normalized = normalizeProtectedAlias(alias);
+  const compact = normalized.replace(/\s+/g, "");
+  [alias, normalized, compact].forEach((value) => {
+    if (value) PROTECTED_ALIASES.set(value, canonical);
+  });
+});
 
 const PROTECTED_NORMALIZED = PROTECTED_TERMS.map((term) => ({
   canonical: term,

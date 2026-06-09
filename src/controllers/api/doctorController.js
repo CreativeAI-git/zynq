@@ -16,8 +16,7 @@ import { translator } from "../../utils/misc.util.js";
 import { mergeGraphAwareResults } from "../../utils/search_graph.util.js";
 import { parseSearchIntent } from "../../search/intent_taxonomy.js";
 import { enforceDeviceSectionCandidates } from "../../search/typed_sections.js";
-import { containsProtectedTerm } from "../../search/protected_terms.js";
-import { resolveProtectedDisplayName } from "../../search/protected_terms.js";
+import { containsProtectedTerm, protectTermsInText, restoreProtectedTerms, resolveProtectedDisplayName } from "../../search/protected_terms.js";
 
 
 /**
@@ -102,12 +101,16 @@ async function localizeDeviceSearchResult(device = {}, language = "en") {
     // device_name is a single brand name — protect it from translation
     const baseDeviceName = device.device_name || device.device_swedish || "";
 
-    // treatment_name may be a GROUP_CONCAT comma-separated string like "Laser,Botox,IPL"
-    // Split → localize each → rejoin
+    // treatment_name may be a GROUP_CONCAT comma-separated string like "Pico Laser,Botox,IPL"
+    // Protect brand terms → localize each part → restore protected terms
     const localizeCommaSeparated = async (str, lang) => {
         if (!str) return str;
         const parts = String(str).split(",").map(s => s.trim()).filter(Boolean);
-        const localized = await Promise.all(parts.map(p => localizeTextValue(p, lang)));
+        const localized = await Promise.all(parts.map(async (p) => {
+            const { protectedText, map } = protectTermsInText(p);
+            const translated = await localizeTextValue(protectedText, lang);
+            return restoreProtectedTerms(translated, map);
+        }));
         return localized.join(", ");
     };
 
@@ -128,9 +131,10 @@ async function localizeDeviceSearchResult(device = {}, language = "en") {
         treatment_swedish: treatmentSwedishLocalized,
         associated_treatments: await Promise.all((device.associated_treatments || []).map(async (treatment) => {
             const base = treatment?.name || treatment?.swedish || "";
+            const { protectedText: protectedBase, map: baseMap } = protectTermsInText(base);
             const [localizedName, localizedSwedish] = await Promise.all([
-                localizeTextValue(base, language),
-                localizeTextValue(treatment?.swedish || base, "sv")
+                localizeTextValue(protectedBase, language).then(t => restoreProtectedTerms(t, baseMap)),
+                localizeTextValue(protectedBase, "sv").then(t => restoreProtectedTerms(t, baseMap))
             ]);
             return {
                 ...treatment,
@@ -149,6 +153,55 @@ async function localizeSubTreatmentSearchResult(subTreatment = {}, language = "e
         treatment_name: await localizeTextValue(subTreatment.treatment_name || subTreatment.treatment_swedish || "", language),
         treatment_swedish: await localizeTextValue(subTreatment.treatment_swedish || subTreatment.treatment_name || "", "sv")
     };
+}
+
+function getSearchRequestContext(req = {}) {
+    const body = req.body || {};
+    const filters = body.filters || {};
+    const pagination = body.pagination || {};
+
+    return {
+        filters,
+        page: pagination.page ?? body.page,
+        limit: pagination.limit ?? body.limit,
+        search: String(filters.search ?? body.search ?? "").trim(),
+        debugSearch: Boolean(filters.debug_search ?? body.debug_search)
+    };
+}
+
+async function normalizeSearchQuery(search = "", language = "en", translateLongQuery = true) {
+    const trimmed = String(search || "").trim();
+    if (trimmed.length <= 3) return trimmed;
+    const likelyNonEnglish =
+        language !== "en" ||
+        /[åäöÅÄÖ]/.test(trimmed) ||
+        /\b(mörka|morka|under ögon|laserbehandling|behandling|ringar|finnar|hårborttagning)\b/i.test(trimmed);
+    const shouldTranslate = translateLongQuery && likelyNonEnglish;
+    if (!shouldTranslate) return trimmed;
+
+    // Keep protected brand/device terms intact while translating the rest of the query.
+    const { protectedText, map } = protectTermsInText(trimmed);
+    const translated = await translator(protectedText, "en");
+    return restoreProtectedTerms(translated, map).trim();
+}
+
+async function normalizeSearchQueryForIntent(search = "", language = "en", translateLongQuery = true) {
+    const normalized = await normalizeSearchQuery(search, language, translateLongQuery);
+    return normalized || String(search || "").trim();
+}
+
+function shouldExpandRelatedSearch(queryInfo = {}, search = "") {
+    const normalized = String(queryInfo?.normalized || search || "").trim();
+    if (!normalized) return false;
+
+    // Keep broader or canonical medical queries eligible, but avoid spraying
+    // related results for one-off admin/test words like "zelda".
+    if (queryInfo?.canonicalIntent) return true;
+    if (queryInfo?.intentType && queryInfo.intentType !== "general") return true;
+
+    const confidence = Number(queryInfo?.confidence ?? 0);
+    const tokenCount = normalized.split(/\s+/).filter(Boolean).length;
+    return confidence >= 0.70 || tokenCount >= 2;
 }
 
 
@@ -627,24 +680,14 @@ export const getSingleDoctorRatings = asyncHandler(async (req, res) => {
 export const search_home_entities = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    let { filters = {}, page, limit } = req.body || {};
-    const debugSearch = Boolean(filters?.debug_search);
-
-    const search = filters.search?.trim() || "";
+    const { search, page, limit, debugSearch } = getSearchRequestContext(req);
 
     if (!search) {
         return handleError(res, 400, language, "EMPTY_SEARCH_QUERY");
     }
 
     try {
-        var normalized_search;
-        if (search.length <= 3) {
-            console.log("Short query, returning default valid_medical");
-            normalized_search = search
-        } else {
-            console.log("Long query, translating to english");
-            normalized_search = await translator(search, 'en');
-        }
+        const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
 
@@ -658,7 +701,7 @@ export const search_home_entities = asyncHandler(async (req, res) => {
             return handleSuccess(res, 200, "en", "No Data Found", []);
         }
         console.log("Search Intent Ranking:", intentRanking);
-        const queryInfo = parseSearchIntent(search || normalized_search);
+        const queryInfo = parseSearchIntent(normalized_search || search);
 
         // 2️⃣ Run all searches (as you already do)
         const [doctors, clinics, devices, treatments, subTreatments] = await Promise.all([
@@ -675,12 +718,14 @@ export const search_home_entities = asyncHandler(async (req, res) => {
         });
 
         // 2b) Relationship-aware graph expansion (device <-> treatment + mapped neighbors)
-        const relationExpansion = await userModels.getRelationshipAwareSearchExpansion({
-            search: normalized_search,
-            language,
-            seedDevices: typedPrimaryDevices.accepted,
-            seedTreatments: treatments
-        });
+        const relationExpansion = shouldExpandRelatedSearch(queryInfo, normalized_search)
+            ? await userModels.getRelationshipAwareSearchExpansion({
+                search: normalized_search,
+                language,
+                seedDevices: typedPrimaryDevices.accepted,
+                seedTreatments: treatments
+            })
+            : { devices: [], treatments: [], doctors: [], clinics: [], debug: {} };
 
         const typedRelationDevices = enforceDeviceSectionCandidates(relationExpansion.devices || [], queryInfo, {
             minRelationshipStrength: 0.68
@@ -717,6 +762,14 @@ export const search_home_entities = asyncHandler(async (req, res) => {
             primaryPriority: 1,
             relatedDefaultPriority: 2
         });
+
+        const localizedDevices = await Promise.all(
+            mergedDevices.map((device) => localizeDeviceSearchResult(device, language))
+        );
+
+        const localizedSubTreatments = await Promise.all(
+            mergedSubTreatments.map((subTreatment) => localizeSubTreatmentSearchResult(subTreatment, language))
+        );
 
 
         // 3️⃣ Enrich images (same as your code)
@@ -789,10 +842,10 @@ export const search_home_entities = asyncHandler(async (req, res) => {
             const key = entity.toLowerCase();
             if (key === "doctor") rankedResults.doctors = annotateSection(mergedDoctors, "doctors");
             if (key === "clinic") rankedResults.clinics = annotateSection(mergedClinics, "clinics");
-            if (key === "devices") rankedResults.devices = annotateSection(mergedDevices, "devices");
+            if (key === "devices") rankedResults.devices = annotateSection(localizedDevices, "devices");
             // if (key === "product") rankedResults.products = enrichedProducts;
             if (key === "treatment") rankedResults.treatments = annotateSection(mergedTreatments, "treatments");
-            if (key === "sub treatment") rankedResults.sub_treatments = annotateSection(mergedSubTreatments, "sub_treatments");
+            if (key === "sub treatment") rankedResults.sub_treatments = annotateSection(localizedSubTreatments, "sub_treatments");
         }
 
         if (debugSearch) {
@@ -859,6 +912,22 @@ async function detectSearchIntent(searchQuery) {
         return {
             type: "valid_medical",
             ranking: ["Doctor", "Clinic", "Treatment", "Sub Treatment", "Devices"]
+        };
+    }
+
+    if (/\b(dark circles|mörka ringar|morka ringar|under eye|under eyes|eye bags)\b/i.test(trimmed)) {
+        console.log("⚙️ Detected under-eye concern — prioritizing Treatment ranking");
+        return {
+            type: "valid_medical",
+            ranking: ["Treatment", "Sub Treatment", "Clinic", "Doctor", "Devices"]
+        };
+    }
+
+    if (/\b(laser|laserbehandling|laser behandling|ipl|fotona|morpheus8|lasermd|nd:?yag|prp)\b/i.test(trimmed)) {
+        console.log("⚙️ Detected laser/device keyword — prioritizing Devices ranking");
+        return {
+            type: "valid_medical",
+            ranking: ["Devices", "Treatment", "Sub Treatment", "Clinic", "Doctor"]
         };
     }
 
@@ -1012,23 +1081,14 @@ async function detectSearchIntent(searchQuery) {
 export const detectSearchIntentController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    let { filters = {}, page, limit } = req.body || {};
-
-    const search = filters.search?.trim() || "";
+    const { search } = getSearchRequestContext(req);
 
     if (!search) {
         return handleError(res, 400, language, "EMPTY_SEARCH_QUERY");
     }
 
     try {
-        var normalized_search;
-        if (search.length <= 3) {
-            // console.log("Short query, returning default valid_medical");
-            normalized_search = search
-        } else {
-            // console.log("Long query, translating to english");
-            normalized_search = await translator(search, 'en');
-        }
+        const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
 
@@ -1055,26 +1115,14 @@ export const detectSearchIntentController = asyncHandler(async (req, res) => {
 export const getDoctorsByFirstNameSearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    let { filters = {}, page, limit } = req.body || {};
-
-    const search = filters.search?.trim() || "";
+    const { search, page, limit } = getSearchRequestContext(req);
 
     if (!search) {
         return handleError(res, 400, language, "EMPTY_SEARCH_QUERY");
     }
 
     try {
-        var normalized_search;
-        if (search.length <= 3) {
-            console.log("Short query, returning default valid_medical");
-            normalized_search = search
-        } else {
-            normalized_search = search
-            if (language !== "en") {
-                console.log("Long query, translating to english");
-                normalized_search = await translator(search, 'en');
-            }
-        }
+        const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
 
@@ -1108,26 +1156,14 @@ export const getDoctorsByFirstNameSearchOnlyController = asyncHandler(async (req
 export const getClinicsByNameSearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    let { filters = {}, page, limit } = req.body || {};
-
-    const search = filters.search?.trim() || "";
+    const { search, page, limit } = getSearchRequestContext(req);
 
     if (!search) {
         return handleError(res, 400, language, "EMPTY_SEARCH_QUERY");
     }
 
     try {
-        var normalized_search;
-        if (search.length <= 3) {
-            console.log("Short query, returning default valid_medical");
-            normalized_search = search
-        } else {
-            normalized_search = search
-            if (language !== "en") {
-                console.log("Long query, translating to english");
-                normalized_search = await translator(search, 'en');
-            }
-        }
+        const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
 
@@ -1162,26 +1198,14 @@ export const getClinicsByNameSearchOnlyController = asyncHandler(async (req, res
 export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    let { filters = {}, page, limit } = req.body || {};
-
-    const search = filters.search?.trim() || "";
+    const { search, page, limit } = getSearchRequestContext(req);
 
     if (!search) {
         return handleError(res, 400, language, "EMPTY_SEARCH_QUERY");
     }
 
     try {
-        var normalized_search;
-        if (search.length <= 3) {
-            console.log("Short query, returning default valid_medical");
-            normalized_search = search
-        } else {
-            console.log("Long query, translating to english");
-            normalized_search = search
-            if (language !== "en") {
-                normalized_search = await translator(search, 'en');
-            }
-        }
+        const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
 
@@ -1214,24 +1238,14 @@ export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res
 
 export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
-    let { filters = {}, page, limit } = req.body || {};
-    const debugSearch = Boolean(filters?.debug_search);
-
-    const search = filters.search?.trim() || "";
+    const { search, page, limit, debugSearch } = getSearchRequestContext(req);
 
     if (!search) {
         return handleError(res, 400, language, "EMPTY_SEARCH_QUERY");
     }
 
     try {
-        var normalized_search;
-        if (search.length <= 3) {
-            console.log("Short query, returning default valid_medical");
-            normalized_search = search
-        } else {
-            console.log("Long query, translating to english");
-            normalized_search = await translator(search, 'en');
-        }
+        const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
 
@@ -1241,7 +1255,7 @@ export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res)
 
 
         // 2️⃣ Run all searches
-        const queryInfo = parseSearchIntent(search || normalized_search);
+        const queryInfo = parseSearchIntent(normalized_search || search);
         console.log("[TREATMENT API DEBUG] queryInfo:", queryInfo);
 
         const [devices, rawTreatments] = await Promise.all([
@@ -1270,12 +1284,14 @@ export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res)
 
         console.log("[TREATMENT API DEBUG] treatmentsArray length:", treatmentsArray?.length);
 
-        const relationExpansion = await userModels.getRelationshipAwareSearchExpansion({
-            search: normalized_search,
-            language,
-            seedDevices: typedPrimaryDevices.accepted,
-            seedTreatments: treatmentsArray
-        });
+        const relationExpansion = shouldExpandRelatedSearch(queryInfo, normalized_search)
+            ? await userModels.getRelationshipAwareSearchExpansion({
+                search: normalized_search,
+                language,
+                seedDevices: typedPrimaryDevices.accepted,
+                seedTreatments: treatmentsArray
+            })
+            : { devices: [], treatments: [], doctors: [], clinics: [], debug: {} };
 
         console.log("[TREATMENT API DEBUG] relationExpansion.treatments length:", relationExpansion?.treatments?.length);
 
@@ -1311,25 +1327,14 @@ export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res)
 export const getSubtreatmentsBySearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    let { filters = {}, page, limit } = req.body || {};
-
-    const search = filters.search?.trim() || "";
+    const { search, page, limit } = getSearchRequestContext(req);
 
     if (!search) {
         return handleError(res, 400, language, "EMPTY_SEARCH_QUERY");
     }
 
     try {
-        var normalized_search;
-        if (search.length <= 3) {
-            console.log("Short query, returning default valid_medical");
-            normalized_search = search
-        } else {
-            console.log("Long query, translating to english");
-            normalized_search = search;
-            if (language != 'en') { normalized_search = await translator(search, 'en'); }
-
-        }
+        const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
 
@@ -1339,7 +1344,7 @@ export const getSubtreatmentsBySearchOnlyController = asyncHandler(async (req, r
 
 
         // 2️⃣ Run all searches
-        const queryInfo = parseSearchIntent(search || normalized_search);
+        const queryInfo = parseSearchIntent(normalized_search || search);
 
         const [devices, treatments, subtreatments] = await Promise.all([
             userModels.getDevicesByNameSearchOnly({ search: normalized_search, page, limit }),
@@ -1351,12 +1356,14 @@ export const getSubtreatmentsBySearchOnlyController = asyncHandler(async (req, r
             minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
         });
 
-        const relationExpansion = await userModels.getRelationshipAwareSearchExpansion({
-            search: normalized_search,
-            language,
-            seedDevices: typedPrimaryDevices.accepted,
-            seedTreatments: treatments
-        });
+        const relationExpansion = shouldExpandRelatedSearch(queryInfo, normalized_search)
+            ? await userModels.getRelationshipAwareSearchExpansion({
+                search: normalized_search,
+                language,
+                seedDevices: typedPrimaryDevices.accepted,
+                seedTreatments: treatments
+            })
+            : { devices: [], treatments: [], doctors: [], clinics: [], debug: {} };
 
         const mergedTreatments = mergeGraphAwareResults(treatments, relationExpansion.treatments, {
             keySelector: (row) => row?.treatment_id,

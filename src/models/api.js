@@ -3288,6 +3288,48 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
     try {
         if (!search?.trim()) return [];
         const queryInfo = parseSearchIntent(search);
+        console.log("queryInfo", queryInfo);
+        const negationTargets = Array.isArray(queryInfo?.negationTargets)
+            ? Array.from(new Set(queryInfo.negationTargets.map((value) => String(value || "").trim()).filter(Boolean)))
+            : [];
+        const normalizedSearch = normalizeSearchText(search);
+        const negationOnlyText = normalizedSearch
+            .replace(/\b(?:non|not|without|exclude|avoid|no|anti)\b[\s-]*/gi, " ")
+            .replace(/\b(?:laser|ipl|pico|picosecond|alexandrite|thulium|fotona|clarity|candela|lasermd|lase md|nd:yag|nd yag|n d yag|rf|radiofrequency|radio frequency|radiofrekvens|hifu|ultrasound|ultraljud|microneedling|skinpen|dermapen|filler|hair removal|hårborttagning)\b/gi, " ")
+            .replace(/[\s-]*(?:free|less)\b/gi, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        const pureNegationQuery = Boolean(queryInfo?.hasNegation && negationTargets.length > 0 && !negationOnlyText);
+        const negationDeviceKeywordMap = {
+            laser: ["laser", "ipl", "pico", "picosecond", "alexandrite", "thulium", "fotona", "clarity ii", "candela nordlys", "lasermd", "lase md", "nd:yag", "nd yag", "n d yag", "lumecca"],
+            rf: ["rf", "radiofrequency", "radio frequency", "radiofrekvens", "microneedling rf", "secret rf", "genius rf", "vivace rf"],
+            hifu: ["hifu", "high intensity focused ultrasound", "ultrasound", "ultraljud", "ultherapy", "ultraformer"],
+            microneedling: ["microneedling", "microneedl", "skinpen", "dermapen", "micro needling", "morpheus8"],
+            filler: ["filler", "fillers", "ha filler", "hyaluronic", "restylane", "juvederm", "juvéderm", "belkyra"],
+            hair_removal: ["hair removal", "laser hair removal", "hair reduction", "hårborttagning", "harborttagning", "soprano", "gentlemax", "lightsheer"]
+        };
+        const hasNegationToken = (text = "", phrase = "") => {
+            const normalizedText = normalizeSearchText(text);
+            const normalizedPhrase = normalizeSearchText(phrase);
+            if (!normalizedText || !normalizedPhrase) return false;
+            const escaped = normalizedPhrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+            return new RegExp(`\\b${escaped}\\b`, "i").test(normalizedText);
+        };
+        const isNegatedDeviceRow = (row = {}) => {
+            const searchableText = normalizeSearchText([
+                row.device_name,
+                row.device_swedish,
+                row.classification_type,
+                row.category,
+                row.treatment_name,
+                row.treatment_swedish,
+                row.like_wise_terms
+            ].filter(Boolean).join(" "));
+            return negationTargets.some((target) => {
+                const keywords = negationDeviceKeywordMap[target] || [];
+                return keywords.some((keyword) => hasNegationToken(searchableText, keyword));
+            });
+        };
         const collectSearchableText = (row = {}) => {
             const noiseKeyPattern = /(^id$|_id$|^created_at$|^updated_at$|^deleted_at$|^is_deleted$|^approval_status$|^embeddings?$|^score$|_score$|^match_text$|^query_)/i;
             return Object.entries(row)
@@ -3331,6 +3373,45 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
           AND d.is_deleted = 0
       `);
 
+        console.log("raw DB rows", results.length);
+
+        if (pureNegationQuery) {
+            results = results.filter((row) => !isNegatedDeviceRow(row));
+
+            results = results.map((row) => {
+                const treatmentNames = String(row.treatment_name || "")
+                    .split(",")
+                    .map((item) => item.trim())
+                    .filter(Boolean);
+                const treatmentSwedish = String(row.treatment_swedish || "")
+                    .split(",")
+                    .map((item) => item.trim())
+                    .filter(Boolean);
+                const treatmentIds = String(row.treatment_ids || "")
+                    .split(",")
+                    .map((item) => item.trim())
+                    .filter(Boolean);
+
+                const associated_treatments = treatmentNames.map((name, index) => ({
+                    name,
+                    swedish: treatmentSwedish[index] || null,
+                    treatment_id: treatmentIds[index] || row.treatment_id || null
+                }));
+
+                return {
+                    ...row,
+                    associated_treatments
+                };
+            });
+
+            results = results
+                .sort((a, b) => String(a.device_name || a.name || "").localeCompare(String(b.device_name || b.name || "")))
+                .slice(0);
+
+            results = paginateRows(results, limit, page);
+            return results;
+        }
+
 
         const queryProfile = buildQueryProfile(
             search,
@@ -3342,6 +3423,7 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
             phase: "candidate_generation",
             minRelationshipStrength: 0
         });
+        console.log("typedPre.accepted", typedPre.accepted.length);
         results = typedPre.accepted;
 
         // 3️⃣ Semantic/lexical ranking only on typed-safe candidates
@@ -3356,11 +3438,12 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
             phase: "section_assignment",
             minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
         });
+        console.log("typedFinal.accepted", typedFinal.accepted.length);
         results = typedFinal.accepted;
 
         // Broad device queries should still surface the approved device catalog even
         // if a strict ranking pass is too conservative for brand-only laser devices.
-        if (!results.length && typedPre.accepted.length > 0) {
+        if (!results.length && queryInfo.intentBucket && typedPre.accepted.length > 0) {
             results = typedPre.accepted;
         }
 
@@ -3936,6 +4019,51 @@ export const getTreatmentsBySearchOnly = async ({
     try {
         if (!search?.trim()) return [];
         const queryInfo = parseSearchIntent(actualSearch || search);
+        const negationTargets = Array.isArray(queryInfo?.negationTargets)
+            ? Array.from(new Set(queryInfo.negationTargets.map((value) => String(value || "").trim()).filter(Boolean)))
+            : [];
+        const normalizedSearch = normalizeSearchText(actualSearch || search);
+        const negationOnlyText = normalizedSearch
+            .replace(/\b(?:non|not|without|exclude|avoid|no|anti)\b[\s-]*/gi, " ")
+            .replace(/\b(?:laser|ipl|pico|picosecond|alexandrite|thulium|fotona|clarity|candela|lasermd|lase md|nd:yag|nd yag|n d yag|rf|radiofrequency|radio frequency|radiofrekvens|hifu|ultrasound|ultraljud|microneedling|skinpen|dermapen|morpheus|morpheus8|morpheus 8|filler|hair removal|hårborttagning)\b/gi, " ")
+            .replace(/[\s-]*(?:free|less)\b/gi, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        const pureNegationQuery = Boolean(queryInfo?.hasNegation && negationTargets.length > 0 && !negationOnlyText);
+        const negationTreatmentKeywordMap = {
+            laser: ["laser", "ipl", "pico", "picosecond", "alexandrite", "thulium", "fotona", "clarity ii", "candela nordlys", "lasermd", "lase md", "nd:yag", "nd yag", "n d yag", "lumecca"],
+            rf: ["rf", "radiofrequency", "radio frequency", "radiofrekvens", "microneedling rf", "secret rf", "genius rf", "vivace rf"],
+            hifu: ["hifu", "high intensity focused ultrasound", "ultrasound", "ultraljud", "ultherapy", "ultraformer"],
+            microneedling: ["microneedling", "microneedl", "skinpen", "dermapen", "micro needling", "morpheus", "morpheus8", "morpheus 8"],
+            filler: ["filler", "fillers", "ha filler", "hyaluronic", "restylane", "juvederm", "juvéderm", "belkyra"],
+            hair_removal: ["hair removal", "laser hair removal", "hair reduction", "hårborttagning", "harborttagning", "soprano", "gentlemax", "lightsheer"]
+        };
+        const hasNegationToken = (text = "", phrase = "") => {
+            const normalizedText = normalizeSearchText(text);
+            const normalizedPhrase = normalizeSearchText(phrase);
+            if (!normalizedText || !normalizedPhrase) return false;
+            const escaped = normalizedPhrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+            return new RegExp(`\\b${escaped}\\b`, "i").test(normalizedText);
+        };
+        const isNegatedTreatmentRow = (row = {}) => {
+            const searchableText = normalizeSearchText([
+                row.name,
+                row.swedish,
+                row.classification_type,
+                row.description_en,
+                row.description_sv,
+                row.like_wise_terms,
+                row.like_wise_terms_swedish,
+                row.device_name,
+                row.device_name_swedish,
+                row.concern_name,
+                row.concern_swedish
+            ].filter(Boolean).join(" "));
+            return negationTargets.some((target) => {
+                const keywords = negationTreatmentKeywordMap[target] || [];
+                return keywords.some((keyword) => hasNegationToken(searchableText, keyword));
+            });
+        };
 
         // 1️⃣ Fetch all treatments that have embeddings
         let results = await db.query(`
@@ -3978,7 +4106,19 @@ export const getTreatmentsBySearchOnly = async ({
         DISTINCT tbd.swedish
         ORDER BY tbd.name
         SEPARATOR ','
-    ) AS device_name_swedish
+    ) AS device_name_swedish,
+
+     GROUP_CONCAT(
+        DISTINCT tc.name
+        ORDER BY tc.name
+        SEPARATOR ','
+    ) AS concern_name,
+
+     GROUP_CONCAT(
+        DISTINCT tc.swedish
+        ORDER BY tc.name
+        SEPARATOR ','
+    ) AS concern_swedish
 
       FROM tbl_treatments t
       
@@ -3993,22 +4133,48 @@ export const getTreatmentsBySearchOnly = async ({
     ON ttb.treatment_id = t.treatment_id
    LEFT JOIN tbl_benefits tb
     ON tb.benefit_id = ttb.benefit_id
-    AND tb.is_deleted = 0
-   AND tb.approval_status = 'APPROVED'
+     AND tb.is_deleted = 0
+    AND tb.approval_status = 'APPROVED'
 
       LEFT JOIN tbl_treatment_devices d
     ON d.treatment_id = t.treatment_id
    LEFT JOIN tbl_devices tbd
     ON tbd.device_id = d.device_id
-    AND tbd.is_deleted = 0
-   AND tbd.approval_status = 'APPROVED'
+     AND tbd.is_deleted = 0
+    AND tbd.approval_status = 'APPROVED'
 
+      LEFT JOIN tbl_treatment_concerns ttc
+    ON ttc.treatment_id = t.treatment_id
+   LEFT JOIN tbl_concerns tc
+    ON tc.concern_id = ttc.concern_id
+     AND tc.is_deleted = 0
+    AND tc.approval_status = 'APPROVED'
 
       WHERE t.is_deleted = 0 AND t.approval_status = 'APPROVED'
 
       GROUP BY t.treatment_id
       ORDER BY t.treatment_id
     `);
+
+        if (pureNegationQuery || negationTargets.length > 0) {
+            results = results.filter((row) => !isNegatedTreatmentRow(row));
+
+            if (pureNegationQuery) {
+                results = results.map((row) => ({
+                    ...row,
+                    name: restoreCanonicalBrandTerms(language === "en" ? row.name : row.swedish),
+                    description: language === "en" ? row.description_en : row.description_sv,
+                    benefits: language === "en" ? row.benefits_en : row.benefits_sv,
+                    device_name: restoreCanonicalBrandTerms(language === "en" ? row.device_name : (row.device_name_swedish || row.device_name)),
+                    like_wise_terms: restoreCanonicalBrandTerms(language === "en" ? row.like_wise_terms : (row.like_wise_terms_swedish || row.like_wise_terms)),
+                    concern_name: language === "en" ? row.concern_name : (row.concern_swedish || row.concern_name),
+                    concern_swedish: row.concern_swedish || null
+                }));
+
+                results = paginateRows(results, limit, page);
+                return results;
+            }
+        }
 
         const queryProfile = buildQueryProfile(
             actualSearch || search,

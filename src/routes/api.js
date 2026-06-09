@@ -279,7 +279,7 @@ router.delete('/draft-appointment/:appointment_id', authenticateUser, validate(d
 router.post("/detect-search-intent", authenticateUser, validate(getAllDoctorsSchema, "body"), doctorControllers.detectSearchIntentController);
 router.post("/get-doctor-by-first-name", authenticateUser, validate(getAllDoctorsSchema, "body"), doctorControllers.getDoctorsByFirstNameSearchOnlyController);
 router.post("/get-clinic-by-name", authenticateUser, validate(getAllDoctorsSchema, "body"), doctorControllers.getClinicsByNameSearchOnlyController);
-router.post("/get-devices-by-name", (req, res, next) => { console.log(req.body); next() }, authenticateUser, doctorControllers.getDevicesByNameSearchOnlyController);
+router.post("/get-devices-by-name", authenticateUser, validate(getAllDoctorsSchema, "body"), doctorControllers.getDevicesByNameSearchOnlyController);
 router.post("/get-treatments-by-search", authenticateUser, validate(getAllDoctorsSchema, "body"), doctorControllers.gettreatmentsBySearchOnlyController);
 router.post("/get-sub-treatments-by-search", authenticateUser, validate(getAllDoctorsSchema, "body"), doctorControllers.getSubtreatmentsBySearchOnlyController);
 

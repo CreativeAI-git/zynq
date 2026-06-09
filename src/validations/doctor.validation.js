@@ -18,6 +18,9 @@ export const getSingleDoctorRatingsSchema = joi.object({
 });
 
 export const getAllDoctorsSchema = joi.object({
+  search: stringValidation.optional(),
+  debug_search: joi.boolean().optional(),
+
   filters: joi.object({
     treatment_ids: idArrayValidation.optional(),
     skin_condition_ids: idArrayValidation.optional(),
@@ -37,6 +40,9 @@ export const getAllDoctorsSchema = joi.object({
     }).optional(),
     min_rating: ratingValidation.optional(),
   }).optional(),
+
+  page: numberValidation.min(1).optional(),
+  limit: numberValidation.min(1).optional(),
 
   sort: joi.object({
     by: joi.string().valid('nearest', 'rating', 'price').default('nearest'),
