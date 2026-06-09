@@ -1,10 +1,7 @@
 import dotenv from "dotenv";
 import { createRequire } from "module";
-import { createRequire } from "module";
 
 dotenv.config();
-
-const require = createRequire(import.meta.url);
 
 const require = createRequire(import.meta.url);
 
@@ -36,22 +33,11 @@ function loadFileTerms() {
   }
 }
 
-function loadFileTerms() {
-  try {
-    const list = require("./protected_terms_list.json");
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
-  }
-}
-
 function buildProtectedTerms() {
   const envJsonTerms = parseJsonArrayEnv(process.env.PROTECTED_TERMS_JSON);
   const envCsvTerms = parseCsvEnv(process.env.PROTECTED_TERMS_CSV);
   const fileTerms = loadFileTerms();
-  const fileTerms = loadFileTerms();
   return Array.from(new Set(
-    [...fileTerms, ...envJsonTerms, ...envCsvTerms]
     [...fileTerms, ...envJsonTerms, ...envCsvTerms]
       .map((term) => String(term || "").trim())
       .filter(Boolean)
@@ -83,34 +69,17 @@ const PROTECTED_ALIASES = (() => {
   });
 
   // Explicit translations or spelling variants (e.g. Swedish DB/Google Translate leaks) mapped to canonical brand names
-  const explicitAliases = {
-    "klarhet ii": "Clarity II",
-    "klarhet 2": "Clarity II",
-    "klarhet": "Clarity II",
-    "ikon": "Icoone",
-    "dioxin": "Dioxium",
-    "lasermd": "LaseMD",
-    "stjärnvandrare": "StarWalker",
-    "stjarnvandrare": "StarWalker",
-    "norrsken": "Nordlys",
-    "northern lights": "Nordlys",
-    "kandela": "Candela",
-    "asklepion": "Asclepion",
-    "kollaserpeeling": "CarbonPeel",
-    "koldioxidlaser-peel": "Carbon Laser Peel",
-    "ellips": "Ellipse"
-  };
 
-  Object.entries(explicitAliases).forEach(([alias, canonical]) => {
-    const lower = alias.toLowerCase();
-    const normalized = normalizeProtectedAlias(alias);
-    const compact = normalized.replace(/\s+/g, "");
+  // Object.entries(explicitAliases).forEach(([alias, canonical]) => {
+  //   const lower = alias.toLowerCase();
+  //   const normalized = normalizeProtectedAlias(alias);
+  //   const compact = normalized.replace(/\s+/g, "");
 
-    [lower, normalized, compact].forEach((a) => {
-      if (!a) return;
-      aliasMap.set(a, canonical);
-    });
-  });
+  //   [lower, normalized, compact].forEach((a) => {
+  //     if (!a) return;
+  //     aliasMap.set(a, canonical);
+  //   });
+  // });
 
   // Explicit translations or spelling variants (e.g. Swedish DB/Google Translate leaks) mapped to canonical brand names
   const explicitAliases = {

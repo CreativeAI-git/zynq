@@ -728,7 +728,7 @@ export const applyLanguageOverwrite = (data, lang = "en") => {
                     }
 
                     // Auto-detect language key pairs inside this object
-                    const pairs = findLanguagePairs(newObj);
+                    // const pairs = findLanguagePairs(newObj);
                     // Auto-detect language key pairs inside this object
                     const pairs = findLanguagePairs(newObj);
 
@@ -780,8 +780,8 @@ export const applyLanguageOverwrite = (data, lang = "en") => {
 
 // Detect matching language pairs automatically
 const findLanguagePairs = (obj) => {
-    const keys = Object.keys(obj);
-    const pairs = [];
+    // const keys = Object.keys(obj);
+    // const pairs = [];
     const keys = Object.keys(obj);
     const pairs = [];
 
