@@ -12,6 +12,9 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  connectTimeout: Number(process.env.DB_CONNECT_TIMEOUT || 20000),
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
 });
 
 export async function connectDB() {
@@ -31,7 +34,28 @@ export const db = {
       const [rows] = await pool.query(sql, params);
       return rows || []; // ensures it always returns an array
     } catch (err) {
-      console.error("DB Query Error:", err.message);
+      const retryable = ["ETIMEDOUT", "ECONNRESET", "PROTOCOL_CONNECTION_LOST", "ER_CON_COUNT_ERROR"].includes(err?.code);
+      console.error("DB Query Error:", {
+        code: err?.code,
+        message: err?.message,
+        sqlState: err?.sqlState,
+        sqlMessage: err?.sqlMessage
+      });
+
+      if (retryable) {
+        try {
+          const [rows] = await pool.query(sql, params);
+          return rows || [];
+        } catch (retryErr) {
+          console.error("DB Query Retry Failed:", {
+            code: retryErr?.code,
+            message: retryErr?.message,
+            sqlState: retryErr?.sqlState,
+            sqlMessage: retryErr?.sqlMessage
+          });
+        }
+      }
+
       return []; // return empty array on error if you want to avoid crashes
     }
   },
