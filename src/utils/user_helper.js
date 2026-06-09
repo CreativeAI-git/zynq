@@ -5,7 +5,8 @@ import base64url from 'base64url';
 import dotenv from "dotenv";
 import dayjs from 'dayjs';
 import axios from 'axios';
-import { protectTermsInText, restoreProtectedTerms } from "../search/protected_terms.js";
+import { protectTermsInText, restoreProtectedTerms, restoreCanonicalBrandTerms } from "../search/protected_terms.js";
+import { translationCache } from "./translation_cache.js";
 dotenv.config();
 const APP_URL = process.env.APP_URL;
 
@@ -191,21 +192,59 @@ export const getAppointmentDetails = async (userId, appointmentId) => {
 //     }
 // };
 
-export const googleTranslator = async(question, targetLang) => {
-    try {
-        const { protectedText, map } = protectTermsInText(question || "");
-        const url = `https://translation.googleapis.com/language/translate/v2?key=${process.env.GOOGLE_TRANSLATE_KEY}`;
-        const body = {
-            q: protectedText,
-            target: targetLang,
-            format: 'text'
-        };
+const PENDING_TRANSLATIONS = new Map();
 
-        const resp = await axios.post(url, body);
-        const translated = resp.data.data.translations[0].translatedText;
-        return restoreProtectedTerms(translated, map);
+export const googleTranslator = async (question, targetLang) => {
+    try {
+        if (!question || !String(question).trim()) return question || "";
+
+        const text = String(question).trim();
+
+        // 1️⃣ Check cache first
+        const cached = translationCache.get(text, targetLang);
+        if (cached !== undefined) return cached;
+
+        // ── Collapse concurrent duplicate translation requests ──
+        const cacheKey = `${targetLang}::${text}`;
+        if (PENDING_TRANSLATIONS.has(cacheKey)) {
+            return PENDING_TRANSLATIONS.get(cacheKey);
+        }
+
+        const translatePromise = (async () => {
+            // 2️⃣ Protect brand terms
+            const restored = restoreCanonicalBrandTerms(text);
+            const { protectedText, map } = protectTermsInText(restored);
+
+            // 3️⃣ Call Google Translate with timeout
+            const url = `https://translation.googleapis.com/language/translate/v2?key=${process.env.GOOGLE_TRANSLATE_KEY}`;
+            const body = {
+                q: protectedText,
+                target: targetLang,
+                format: 'text'
+            };
+
+            const resp = await axios.post(url, body, { timeout: 5000 });
+            const translated = resp.data.data.translations[0].translatedText;
+            const result = restoreProtectedTerms(translated, map);
+
+            // 4️⃣ Store in cache
+            translationCache.set(text, targetLang, result);
+
+            return result;
+        })();
+
+        PENDING_TRANSLATIONS.set(cacheKey, translatePromise);
+
+        try {
+            return await translatePromise;
+        } finally {
+            PENDING_TRANSLATIONS.delete(cacheKey);
+        }
     } catch (err) {
-        console.error('Translate error:', err.response?.data || err.message);
-        throw err;
+        // Graceful degradation — return original text instead of throwing
+        const errMsg = err?.code || err?.message || "unknown";
+        console.error(`Translate error [${errMsg}]: "${String(question).slice(0, 50)}"`);
+        return question || "";
     }
 };
+

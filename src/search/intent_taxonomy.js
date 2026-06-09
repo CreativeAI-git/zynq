@@ -1,4 +1,4 @@
-﻿import { protectTermsInText, restoreProtectedTerms } from "./protected_terms.js";
+import { protectTermsInText, restoreProtectedTerms } from "./protected_terms.js";
 
 import dotenv from "dotenv";
 
@@ -94,22 +94,26 @@ function buildIntentBuckets() {
       },
       acne_scars: {
         strict: false,
-        include: ["acne scars", "acne scar", "aknearr", "scar", "scars", "ärr", "arr"],
+        include: ["acne scars", "acne scar", "aknearr", "akneärr", "akne arr", "scar", "scars", "ärr", "arr"],
         exclude: []
       },
       redness: {
         strict: false,
-        include: ["redness", "rodhet", "rödhet", "rosacea", "vascular", "blood vessels", "rodnad"],
+        include: ["redness", "rodhet", "rödhet", "rosacea", "vascular", "blood vessels", "rodnad", "blodkärl", "kärl", "ytliga blodkärl"],
         exclude: []
       },
       loose_skin: {
         strict: false,
-        include: ["loose skin", "slapp hud", "skin tightening", "hud tightening", "tightening", "sagging", "firming"],
+        include: ["loose skin", "slapp hud", "skin tightening", "hud tightening", "tightening", "sagging", "firming", "huduppstramning", "huduppstramande", "slapphet", "fasthet"],
         exclude: []
       },
       dark_circles: {
         strict: false,
-        include: ["dark circles", "under eye", "under eyes", "tear trough", "morka ringar", "mörka ringar"],
+        include: [
+          "dark circles", "under eye", "under eyes", "tear trough", "morka ringar", "mörka ringar",
+          "under ögon", "under ögonen", "underögon", "påsar under ögonen", "påsar under ögon",
+          "trötta ögon", "blå under ögonen", "mörka ringar under ögonen"
+        ],
         exclude: []
       },
       hair_removal: {
@@ -155,7 +159,27 @@ function buildIntentBuckets() {
   );
 }
 
-export const INTENT_BUCKETS = buildIntentBuckets();
+const BUILTIN_INTENT_BUCKETS = {
+  under_eye: {
+    strict: false,
+    include: ["dark circles", "mörka ringar", "morka ringar", "under eye", "under eyes", "eye bags"],
+    exclude: []
+  },
+  laser: {
+    strict: true,
+    include: ["laser", "laser treatment", "laserbehandling", "laser behandling", "laser hair removal", "laser pigmentation", "ipl", "fotona", "morpheus8", "prp", "nd:yag", "n d yag", "ndyag", "lasermd", "clarity ii", "candela nordlys"],
+    exclude: []
+  }
+};
+
+const ENV_INTENT_BUCKETS = buildIntentBuckets();
+
+export const INTENT_BUCKETS = {
+  ...ENV_INTENT_BUCKETS,
+  ...Object.fromEntries(
+    Object.entries(BUILTIN_INTENT_BUCKETS).filter(([key]) => !ENV_INTENT_BUCKETS[key])
+  )
+};
 if (Object.keys(INTENT_BUCKETS).length === 0) {
   console.warn("[search] INTENT_BUCKETS is empty. Set SEARCH_INTENT_BUCKETS_JSON.");
 }
@@ -163,19 +187,114 @@ if (Object.keys(INTENT_BUCKETS).length === 0) {
 const NEGATION_PATTERNS = parseJsonRegexListEnv(process.env.SEARCH_NEGATION_PATTERNS_JSON);
 const NEGATION_RULES = parseJsonNegationRulesEnv(process.env.SEARCH_NEGATION_RULES_JSON);
 if (NEGATION_PATTERNS.length === 0) {
-  NEGATION_PATTERNS.push(/\b(non|not|without|exclude|avoid)\s+laser\b/i);
+  NEGATION_PATTERNS.push(/\b(?:non|not|without|exclude|avoid|no|anti)\b[\s-]*laser\b/i);
+  NEGATION_PATTERNS.push(/\blaser[\s-]*(?:free|less)\b/i);
 }
 if (NEGATION_RULES.length === 0) {
-  NEGATION_RULES.push({ pattern: /\b(non|not|without|exclude|avoid)\s+laser\b/i, excludes: ["laser"] });
+  NEGATION_RULES.push({ pattern: /\b(?:non|not|without|exclude|avoid|no|anti)\b[\s-]*laser\b/i, excludes: ["laser"] });
+  NEGATION_RULES.push({ pattern: /\blaser[\s-]*(?:free|less)\b/i, excludes: ["laser"] });
 }
-const TOKEN_REWRITE = parseJsonStringMapEnv(process.env.SEARCH_TOKEN_REWRITE_JSON);
+
+const NEGATION_TARGET_DEFS = [
+  {
+    target: "laser",
+    keywords: ["laser", "ipl", "pico", "picosecond", "alexandrite", "thulium", "fotona", "clarity ii", "candela nordlys", "lasermd", "lase md", "nd:yag", "nd yag", "n d yag"]
+  },
+  {
+    target: "rf",
+    keywords: ["rf", "radiofrequency", "radio frequency", "radiofrekvens", "microneedling rf", "secret rf", "genius rf", "vivace rf"]
+  },
+  {
+    target: "hifu",
+    keywords: ["hifu", "high intensity focused ultrasound", "ultrasound", "ultraljud", "ultherapy", "ultraformer"]
+  },
+  {
+    target: "microneedling",
+    keywords: ["microneedling", "microneedl", "skinpen", "dermapen", "micro needling", "morpheus", "morpheus8", "morpheus 8"]
+  },
+  {
+    target: "filler",
+    keywords: ["filler", "fillers", "ha filler", "hyaluronic", "restylane", "juvederm", "juvéderm", "belkyra"]
+  },
+  {
+    target: "hair_removal",
+    keywords: ["hair removal", "laser hair removal", "hair reduction", "hårborttagning", "harborttagning", "soprano", "gentlemax", "lightsheer"]
+  }
+];
+
+const NEGATION_PREFIX_PATTERN = /\b(?:non|not|without|exclude|avoid|no|anti)\b[\s-]*/i;
+const NEGATION_SUFFIX_PATTERN = /[\s-]*(?:free|less)\b/i;
+
+function buildNegationTargets(normalized = "") {
+  const targets = [];
+  const cleaned = normalizeSearchText(normalized);
+
+  for (const rule of NEGATION_TARGET_DEFS) {
+    const keywordHit = (rule.keywords || []).some((kw) => {
+      const normalizedKeyword = normalizeSearchText(kw);
+      return includesPhrase(cleaned, normalizedKeyword) ||
+        hasTokenCompatibleMatch(cleaned, normalizedKeyword);
+    });
+
+    if (!keywordHit) continue;
+
+    const isNegated =
+      NEGATION_PREFIX_PATTERN.test(cleaned) ||
+      NEGATION_SUFFIX_PATTERN.test(cleaned) ||
+      /\b(?:non|not|without|exclude|avoid|no|anti)\b[\s-]*\S+/i.test(cleaned);
+
+    if (isNegated) targets.push(rule.target);
+  }
+
+  return Array.from(new Set(targets));
+}
+
+function buildNegationSearchHint(targets = []) {
+  const uniqueTargets = Array.from(new Set((targets || []).map((value) => String(value || "").trim()).filter(Boolean)));
+  if (!uniqueTargets.length) return "";
+
+  const map = {
+    laser: "non laser treatments",
+    rf: "non rf treatments",
+    hifu: "non hifu treatments",
+    microneedling: "non microneedling treatments",
+    filler: "non filler treatments",
+    hair_removal: "non hair removal treatments"
+  };
+
+  return uniqueTargets.map((target) => map[target] || `non ${target} treatments`).join(" ");
+}
+
+const DEFAULT_TOKEN_REWRITE = {
+  "dark circles": "dark circles under eye",
+  "mörka ringar": "mörka ringar dark circles under eye",
+  "morka ringar": "morka ringar dark circles under eye",
+  "under eye": "under eye dark circles",
+  "under eyes": "under eyes under eye dark circles",
+  "laserbehandling": "laserbehandling laser treatment",
+  "laser behandling": "laser behandling laser treatment",
+  "laser pigmentering": "laser pigmentering laser pigmentation",
+  "laser hair removal": "laser hair removal hair reduction",
+  "zelda": "zelda"
+};
+const TOKEN_REWRITE = {
+  ...DEFAULT_TOKEN_REWRITE,
+  ...parseJsonStringMapEnv(process.env.SEARCH_TOKEN_REWRITE_JSON)
+};
 
 function escapeRegex(value = "") {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const NORMALIZE_TEXT_CACHE = new Map();
+
 export function normalizeSearchText(value = "") {
-  const { protectedText, map } = protectTermsInText(String(value || ""));
+  const cacheKey = String(value || "");
+  if (NORMALIZE_TEXT_CACHE.has(cacheKey)) {
+    return NORMALIZE_TEXT_CACHE.get(cacheKey);
+  }
+
+  const { protectedText, map } = protectTermsInText(cacheKey);
   let out = protectedText
     .toLowerCase()
     .normalize("NFD")
@@ -190,7 +309,10 @@ export function normalizeSearchText(value = "") {
   }
 
   out = out.replace(/\s+/g, " ").trim();
-  return restoreProtectedTerms(out, map).toLowerCase();
+  const result = restoreProtectedTerms(out, map).toLowerCase();
+  
+  NORMALIZE_TEXT_CACHE.set(cacheKey, result);
+  return result;
 }
 
 function includesPhrase(haystack = "", phrase = "") {
@@ -214,13 +336,31 @@ function hasTokenCompatibleMatch(haystack = "", phrase = "") {
   });
 }
 
+const INTENT_CACHE = new Map();
+
 export function parseSearchIntent(rawSearch = "") {
+  const cacheKey = String(rawSearch || "").trim().toLowerCase();
+  if (INTENT_CACHE.has(cacheKey)) {
+    return INTENT_CACHE.get(cacheKey);
+  }
+
   const normalized = normalizeSearchText(rawSearch);
+  const negationTargets = buildNegationTargets(normalized);
   const matchedNegationRules = NEGATION_RULES.filter((rule) => rule.pattern.test(normalized));
-  const hasNegation = matchedNegationRules.length > 0 || NEGATION_PATTERNS.some((re) => re.test(normalized));
+  const hasNegation = matchedNegationRules.length > 0 || negationTargets.length > 0 || NEGATION_PATTERNS.some((re) => re.test(normalized));
   const negationExcludes = Array.from(new Set(
-    matchedNegationRules.flatMap((rule) => rule.excludes || []).map((v) => normalizeSearchText(v))
+    [
+      ...matchedNegationRules.flatMap((rule) => rule.excludes || []).map((v) => normalizeSearchText(v)),
+      ...negationTargets.map((v) => normalizeSearchText(v))
+    ]
   ));
+  const negationSearchHint = buildNegationSearchHint(negationTargets);
+  const excludesLaser = hasNegation && (
+    negationTargets.includes("laser") ||
+    negationExcludes.includes("laser") ||
+    /\b(?:non|not|without|exclude|avoid|no|anti)\b[\s-]*laser\b/i.test(normalized) ||
+    /\blaser[\s-]*(?:free|less)\b/i.test(normalized)
+  );
   const language = /[\u00e5\u00e4\u00f6]/i.test(rawSearch) ? "sv" : "en";
 
   let intentBucket = null;
@@ -228,6 +368,7 @@ export function parseSearchIntent(rawSearch = "") {
   let matchedKeyword = "";
 
   for (const [bucket, def] of Object.entries(INTENT_BUCKETS)) {
+    if (bucket === "laser" && excludesLaser) continue;
     const includeHits = (def.include || []).filter((kw) => {
       const normalizedKeyword = normalizeSearchText(kw);
       return includesPhrase(normalized, normalizedKeyword) ||
@@ -248,7 +389,7 @@ export function parseSearchIntent(rawSearch = "") {
     ? (INTENT_BUCKETS[intentBucket]?.strict ? "strict_category" : "broad_concern")
     : "general";
 
-  return {
+  const result = {
     raw: rawSearch,
     normalized,
     language,
@@ -258,8 +399,13 @@ export function parseSearchIntent(rawSearch = "") {
     intentBucket,
     intentConfidence: Number(confidence.toFixed(3)),
     matchedKeyword,
-    negationExcludes
+    negationExcludes,
+    negationTargets,
+    negationSearchHint
   };
+
+  INTENT_CACHE.set(cacheKey, result);
+  return result;
 }
 
 export function isTextAllowedForIntent(text = "", queryInfo = {}) {

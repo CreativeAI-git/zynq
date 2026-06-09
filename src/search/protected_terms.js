@@ -1,6 +1,9 @@
 import dotenv from "dotenv";
+import { createRequire } from "module";
 
 dotenv.config();
+
+const require = createRequire(import.meta.url);
 
 function parseJsonArrayEnv(rawValue) {
   if (!rawValue) return [];
@@ -21,17 +24,28 @@ function parseCsvEnv(rawValue) {
     .filter(Boolean);
 }
 
+function loadFileTerms() {
+  try {
+    const list = require("./protected_terms_list.json");
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
 function buildProtectedTerms() {
   const envJsonTerms = parseJsonArrayEnv(process.env.PROTECTED_TERMS_JSON);
   const envCsvTerms = parseCsvEnv(process.env.PROTECTED_TERMS_CSV);
+  const fileTerms = loadFileTerms();
   return Array.from(new Set(
-    [...envJsonTerms, ...envCsvTerms]
+    [...fileTerms, ...envJsonTerms, ...envCsvTerms]
       .map((term) => String(term || "").trim())
       .filter(Boolean)
   ));
 }
 
 export const PROTECTED_TERMS = buildProtectedTerms();
+console.log(`[search] PROTECTED_TERMS loaded: ${PROTECTED_TERMS.length} terms`);
 if (PROTECTED_TERMS.length === 0) {
   console.warn("[search] PROTECTED_TERMS is empty. Using dynamic protected-name detection.");
 }
@@ -53,13 +67,87 @@ const PROTECTED_ALIASES = (() => {
     });
   });
 
+  // Explicit translations or spelling variants (e.g. Swedish DB/Google Translate leaks) mapped to canonical brand names
+  const explicitAliases = {
+    "klarhet ii": "Clarity II",
+    "klarhet 2": "Clarity II",
+    "klarhet": "Clarity II",
+    "ikon": "Icoone",
+    "dioxin": "Dioxium",
+    "lasermd": "LaseMD",
+    "stjärnvandrare": "StarWalker",
+    "stjarnvandrare": "StarWalker",
+    "norrsken": "Nordlys",
+    "northern lights": "Nordlys",
+    "kandela": "Candela",
+    "asklepion": "Asclepion",
+    "kollaserpeeling": "CarbonPeel",
+    "koldioxidlaser-peel": "Carbon Laser Peel",
+    "ellips": "Ellipse"
+  };
+
+  Object.entries(explicitAliases).forEach(([alias, canonical]) => {
+    const lower = alias.toLowerCase();
+    const normalized = normalizeProtectedAlias(alias);
+    const compact = normalized.replace(/\s+/g, "");
+
+    [lower, normalized, compact].forEach((a) => {
+      if (!a) return;
+      aliasMap.set(a, canonical);
+    });
+  });
+
   return aliasMap;
 })();
 
+[
+  ["Clarity II", "Clarity II"],
+  ["Candela Nordlys", "Candela Nordlys"],
+  ["Icoone", "Icoone"],
+  ["Dioxium", "Dioxium"],
+  ["LaseMD", "LaseMD"],
+  ["Fotona StarWalker", "Fotona StarWalker"],
+  ["Foto Starwalker", "Fotona StarWalker"],
+  ["CarbonPeel", "CarbonPeel"],
+  ["Kollaserpeeling", "CarbonPeel"],
+  ["Asclepion", "Asclepion"],
+  ["Asklepion", "Asclepion"],
+  ["QuadroStarPRO Green", "QuadroStarPRO Green"],
+  ["ND:YAG", "ND:YAG"],
+  ["Nd:YAG", "ND:YAG"],
+  ["Ndyag", "ND:YAG"],
+  ["Mörka ringar", "dark circles"],
+  ["Morka ringar", "dark circles"],
+  ["dark circles", "dark circles"],
+  ["Under eye", "under eye"],
+  ["Under eyes", "under eye"],
+  ["Laserbehandling", "laser treatment"],
+  ["Laser behandling", "laser treatment"],
+  ["Laser pigmentering", "laser pigmentation"]
+].forEach(([alias, canonical]) => {
+  const normalized = normalizeProtectedAlias(alias);
+  const compact = normalized.replace(/\s+/g, "");
+  [alias, normalized, compact].forEach((value) => {
+    if (value) PROTECTED_ALIASES.set(value, canonical);
+  });
+});
 const PROTECTED_NORMALIZED = PROTECTED_TERMS.map((term) => ({
   canonical: term,
   normalized: normalizeProtectedAlias(term),
   compact: normalizeProtectedAlias(term).replace(/\s+/g, "")
+}));
+
+// Precompiled regexes for static terms (very fast)
+const PRECOMPILED_STATIC_TERMS = PROTECTED_TERMS.map((term, idx) => ({
+  term,
+  regex: new RegExp(`\\b${escapeRegex(term)}\\b`, "gi"),
+  token: `__pts${idx}__`
+}));
+
+// Precompiled regexes for aliases (very fast)
+const PRECOMPILED_ALIAS_REGEXES = Array.from(PROTECTED_ALIASES.entries()).map(([alias, canonical]) => ({
+  canonical,
+  regex: new RegExp(`\\b${escapeRegex(alias)}\\b`, "gi")
 }));
 
 function escapeRegex(value = "") {
@@ -78,19 +166,24 @@ export function protectTermsInText(text = "") {
   let protectedText = String(text);
   const map = [];
 
-  const terms = Array.from(new Set([
-    ...PROTECTED_TERMS,
-    ...collectDynamicProtectedPhrases(text)
-  ])).sort((a, b) => b.length - a.length);
+  // 1️⃣ Apply precompiled static PROTECTED_TERMS first
+  PRECOMPILED_STATIC_TERMS.forEach(({ term, regex, token }) => {
+    regex.lastIndex = 0;
+    const nextText = protectedText.replace(regex, token);
+    if (nextText !== protectedText) {
+      protectedText = nextText;
+      map.push({ token, term });
+    }
+  });
 
-  terms.forEach((term, idx) => {
-    // Use an opaque token so the translation engine does not try to localize it.
-    // Keep the token lowercase-safe because normalization lowercases text before restore.
-    // const token = `__qz_${idx}_${Math.random().toString(36).slice(2, 8)}__`;
-    const token = `__protected_term_${idx}__`;
-    const re = new RegExp(`\\b${escapeRegex(term)}\\b`, "gi");
-    if (re.test(protectedText)) {
-      protectedText = protectedText.replace(re, token);
+  // 2️⃣ Apply dynamic terms from text analysis
+  const dynamicTerms = collectDynamicProtectedPhrases(protectedText).sort((a, b) => b.length - a.length);
+  dynamicTerms.forEach((term, idx) => {
+    const token = `__ptd${idx}__`;
+    const regex = new RegExp(`\\b${escapeRegex(term)}\\b`, "gi");
+    const nextText = protectedText.replace(regex, token);
+    if (nextText !== protectedText) {
+      protectedText = nextText;
       map.push({ token, term });
     }
   });
@@ -101,7 +194,7 @@ export function protectTermsInText(text = "") {
 export function restoreProtectedTerms(text = "", map = []) {
   let restored = String(text || "");
   map.forEach(({ token, term }) => {
-    restored = restored.replace(new RegExp(token, "g"), term);
+    restored = restored.replace(new RegExp(escapeRegex(token), "g"), term);
   });
   return restored;
 }
@@ -270,6 +363,14 @@ export function getCanonicalProtectedTerm(text = "") {
   if (PROTECTED_ALIASES.has(normalized)) return PROTECTED_ALIASES.get(normalized);
   if (PROTECTED_ALIASES.has(compact)) return PROTECTED_ALIASES.get(compact);
 
+  // OPTIMIZATION: Skip fuzzy matching if the word consists only of lowercase letters and is short (<= 6 chars),
+  // as most brand/protected terms are camelCase, TitleCase, or contain special characters/numerals.
+  const trimmedOriginal = text.trim();
+  const isPlainLowercaseWord = /^[a-z]+$/.test(trimmedOriginal);
+  if (isPlainLowercaseWord && trimmedOriginal.length <= 6) {
+    return null;
+  }
+
   let best = null;
   let bestScore = 0;
   PROTECTED_NORMALIZED.forEach((entry) => {
@@ -292,10 +393,10 @@ export function restoreCanonicalBrandTerms(text = "") {
   let output = String(text || "");
   if (!output) return output;
 
-  for (const [alias, canonical] of PROTECTED_ALIASES.entries()) {
-    const re = new RegExp(`\\b${escapeRegex(alias)}\\b`, "gi");
-    output = output.replace(re, canonical);
-  }
+  // 1️⃣ Apply precompiled alias regexes (very fast)
+  PRECOMPILED_ALIAS_REGEXES.forEach(({ canonical, regex }) => {
+    output = output.replace(regex, canonical);
+  });
 
   // Fuzzy pass for near-translated or lightly corrupted variants.
   output = output
@@ -303,6 +404,10 @@ export function restoreCanonicalBrandTerms(text = "") {
     .map((chunk) => {
       const trimmed = chunk.trim();
       if (!trimmed || /^[,;|]$/.test(trimmed)) return chunk;
+      
+      // OPTIMIZATION: Quick check to skip fuzzy matching for very short/long strings
+      if (trimmed.length < 3 || trimmed.length > 35) return chunk;
+
       const canonical = getCanonicalProtectedTerm(trimmed);
       return canonical ? chunk.replace(trimmed, canonical) : chunk;
     })

@@ -18,6 +18,29 @@ dotenv.config();
 const OPENAI_SEARCH_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
 const client = OPENAI_SEARCH_KEY ? new OpenAI({ apiKey: OPENAI_SEARCH_KEY }) : null;
 
+// ── GPT similarity result cache (search+rowCount → scored results) ──
+const GPT_RESULT_CACHE = new Map();
+const GPT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const GPT_CACHE_MAX = 200;
+
+export function getCachedGPTResult(key) {
+  const entry = GPT_RESULT_CACHE.get(key);
+  if (!entry) return undefined;
+  if (Date.now() - entry.ts > GPT_CACHE_TTL) {
+    GPT_RESULT_CACHE.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+
+export function setCachedGPTResult(key, value) {
+  if (GPT_RESULT_CACHE.size >= GPT_CACHE_MAX) {
+    const oldest = GPT_RESULT_CACHE.keys().next().value;
+    GPT_RESULT_CACHE.delete(oldest);
+  }
+  GPT_RESULT_CACHE.set(key, { value, ts: Date.now() });
+}
+
 async function createSearchChatCompletion(payload, context = "search_similarity") {
   if (!client) {
     console.warn(`[${context}] OpenAI key missing. Falling back to lexical ranking.`);
@@ -25,9 +48,19 @@ async function createSearchChatCompletion(payload, context = "search_similarity"
   }
 
   try {
-    return await client.chat.completions.create(payload);
+    // 15-second timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const result = await client.chat.completions.create(payload, {
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+    return result;
   } catch (error) {
-    console.error(`[${context}] OpenAI similarity failed:`, error?.message || error);
+    const errMsg = error?.code || error?.name || error?.message || "unknown";
+    console.error(`[${context}] OpenAI failed [${errMsg}]`);
     return null;
   }
 }
@@ -158,6 +191,12 @@ function detectCanonicalIntent(rawSearch = "") {
   };
 }
 
+function buildNegationAwareSearchText(queryInfo, fallbackSearch = "") {
+  const hint = String(queryInfo?.negationSearchHint || "").trim();
+  if (hint) return hint;
+  return String(fallbackSearch || "").trim();
+}
+
 function buildTreatmentMatchText(row = {}) {
   return normalizeText([
     row.name,
@@ -170,7 +209,9 @@ function buildTreatmentMatchText(row = {}) {
     row.device_name,
     row.device_name_swedish,
     row.benefits_en,
-    row.benefits_sv
+    row.benefits_sv,
+    row.concern_name,
+    row.concern_swedish
   ].filter(Boolean).join(" "));
 }
 
@@ -429,6 +470,13 @@ export const getTreatmentsAIResult = async (
   const queryProfile = options?.queryProfile || null;
   const adaptiveThreshold = Number(options?.adaptiveThreshold ?? NaN);
   const adaptiveCap = Number(options?.adaptiveCap ?? NaN);
+  const rankingSearch = buildNegationAwareSearchText(queryInfo, queryInfo.normalized);
+  const negativeCategoryQuery = Boolean(
+    queryInfo?.hasNegation &&
+    !queryInfo?.canonicalIntent &&
+    Array.isArray(queryInfo?.negationTargets) &&
+    queryInfo.negationTargets.length > 0
+  );
   const cacheKey = buildTreatmentCacheKey(queryInfo, rows, threshold);
   const cachedRankings = getCachedTreatmentRankings(cacheKey);
 
@@ -524,28 +572,41 @@ export const getTreatmentsAIResult = async (
 
     // For mapped intents (strict/broad), keep ranking deterministic and language-independent.
     // Use semantic model only for general/free-form queries.
-    const shouldUseSemantic = queryInfo.intentType === "general";
+    const shouldUseSemantic =
+      queryInfo.intentType === "general" &&
+      (
+        (
+          (queryInfo.intentConfidence ?? 0) >= 0.55 &&
+          normalizeText(queryInfo.normalized).split(/\s+/).filter(Boolean).length >= 2
+        ) ||
+        negativeCategoryQuery
+      );
 
     const gptCandidates = shouldUseSemantic
       ? guarded
       : [];
 
     const scoreResults = (shouldUseSemantic && gptCandidates.length)
-      ? await batchGPTSimilarity(gptCandidates, queryInfo.normalized)
+      ? await batchGPTSimilarity(gptCandidates, rankingSearch)
       : [];
 
     const scoreMap = new Map(scoreResults.map((r) => [r.id, r.score]));
 
     const scored = guarded.map((r) => {
       const gptScore = scoreMap.get(r.treatment_id) ?? 0;
-      const lexical = r._lexicalScore;
 
-      const exactCategoryHit = queryInfo.strictIntent && isRowInIntentCategory(r._matchText, r, queryInfo);
+      const categoryHit = isRowInIntentCategory(r._matchText, r, queryInfo);
+      let lexical = r._lexicalScore;
+      if (queryInfo.canonicalIntent && categoryHit) {
+        lexical = Math.max(lexical, 0.72);
+      }
+
+      const exactCategoryHit = queryInfo.strictIntent && categoryHit;
       const intentScore = exactCategoryHit ? 1 : (queryInfo.canonicalIntent ? 0.25 : 0.5);
       const categoryScore = queryInfo.canonicalIntent
-        ? (isRowInIntentCategory(r._matchText, r, queryInfo) ? 1 : 0)
+        ? (categoryHit ? 1 : 0)
         : 0.7;
-      const penaltyScore = queryInfo.canonicalIntent && !isRowInIntentCategory(r._matchText, r, queryInfo)
+      const penaltyScore = queryInfo.canonicalIntent && !categoryHit
         ? 0.6
         : 0;
       const weightedScore = (0.58 * lexical) + (0.14 * gptScore) + (0.18 * intentScore) + (0.10 * categoryScore) - penaltyScore;
@@ -676,11 +737,26 @@ export const getSubTreatmentsAIResult = async (
 
   const queryInfo = detectCanonicalIntent(search);
   const normalizedSearch = queryInfo.normalized;
+  const rankingSearch = buildNegationAwareSearchText(queryInfo, normalizedSearch);
+  const negativeCategoryQuery = Boolean(
+    queryInfo?.hasNegation &&
+    !queryInfo?.canonicalIntent &&
+    Array.isArray(queryInfo?.negationTargets) &&
+    queryInfo.negationTargets.length > 0
+  );
 
   // ----- Step 1: GPT similarity -----
-  const shouldUseSemantic = queryInfo.intentType === "general";
+  const shouldUseSemantic =
+    queryInfo.intentType === "general" &&
+    (
+      (
+        (queryInfo.intentConfidence ?? 0) >= 0.55 &&
+        normalizeText(queryInfo.normalized).split(/\s+/).filter(Boolean).length >= 2
+      ) ||
+      negativeCategoryQuery
+    );
   const gptScoreResults = shouldUseSemantic
-    ? await batchGPTSimilaritySubTreatments(rows, normalizedSearch)
+    ? await batchGPTSimilaritySubTreatments(rows, rankingSearch)
     : [];
 
   const gptScoreMap = new Map();
@@ -693,10 +769,13 @@ export const getSubTreatmentsAIResult = async (
     const treatmentSv = normalizeText(r.treatment_swedish || "");
     const text = normalizeText(`${nameEn} ${treatmentEn} ${treatmentSv}`);
 
-    const nameScore = computeLexicalScore(text, queryInfo, {
+    let nameScore = computeLexicalScore(text, queryInfo, {
       name: r.name,
       swedish: r.swedish
     });
+    if (queryInfo.canonicalIntent && isRowInIntentCategory(text, r, queryInfo)) {
+      nameScore = Math.max(nameScore, 0.72);
+    }
     const gptScore = gptScoreMap.get(r.sub_treatment_id) || 0;
 
     const categoryHit = queryInfo.strictIntent
@@ -727,7 +806,7 @@ export const getSubTreatmentsAIResult = async (
     .filter(r => r._categoryHit)
     .filter(r => queryInfo.intentType === "strict_category"
       ? (r.final_score >= Math.max(0.52, threshold) || r.name_score >= 0.78)
-      : r.final_score >= Math.max(0.40, threshold))
+      : r.final_score >= Math.max(negativeCategoryQuery ? 0.22 : 0.40, threshold))
     .sort((a, b) => b.final_score - a.final_score);
 
   // ----- Step 5: Translate if needed -----
@@ -1269,22 +1348,37 @@ export const getDevicesAIResult = async (
   const queryProfile = options?.queryProfile || null;
   const adaptiveThreshold = Number(options?.adaptiveThreshold ?? NaN);
   const adaptiveCap = Number(options?.adaptiveCap ?? NaN);
+  const rankingSearch = buildNegationAwareSearchText(queryInfo, normalizedSearch);
+  const negativeCategoryQuery = Boolean(
+    queryInfo?.hasNegation &&
+    !queryInfo?.canonicalIntent &&
+    Array.isArray(queryInfo?.negationTargets) &&
+    queryInfo.negationTargets.length > 0
+  );
 
   const guardedRows = rows
     .map((r) => ({ ...r, _matchText: buildDeviceMatchText(r) }))
     .filter((r) => !isRowExcludedByNegation(r._matchText, queryInfo))
     .filter((r) => isTextAllowedForIntent(r._matchText, queryInfo) || hasDeviceEntityTokenMatch(r, queryInfo));
 
-  const shouldUseSemantic = queryInfo.intentType === "general";
+  const shouldUseSemantic =
+    queryInfo.intentType === "general" &&
+    (
+      (
+        (queryInfo.intentConfidence ?? 0) >= 0.55 &&
+        normalizeText(queryInfo.normalized).split(/\s+/).filter(Boolean).length >= 2
+      ) ||
+      negativeCategoryQuery
+    );
   const gptScoreResults = shouldUseSemantic
-    ? await batchDeviceGPTSimilarity(guardedRows, normalizedSearch)
+    ? await batchDeviceGPTSimilarity(guardedRows, rankingSearch)
     : [];
   const gptScoreMap = new Map(gptScoreResults.map((r) => [r.id, r.score]));
 
   const scored = guardedRows.map((r) => {
     const gptScore = gptScoreMap.get(r.id) ?? 0;
-    const nameScore = computeDeviceNameScore(r.device_name, normalizedSearch);
-    const swedishNameScore = computeDeviceNameScore(r.device_swedish, normalizedSearch);
+    const nameScore = computeDeviceNameScore(r.device_name, rankingSearch);
+    const swedishNameScore = computeDeviceNameScore(r.device_swedish, rankingSearch);
     const combinedNameScore = Math.max(nameScore, swedishNameScore);
     const metadataScore = Math.max(
       computeDeviceNameScore(r.classification_type, normalizedSearch),
@@ -1325,7 +1419,9 @@ export const getDevicesAIResult = async (
     ? Math.max(0.62, threshold)
     : queryInfo.canonicalIntent
       ? Math.max(0.50, threshold)
-    : Math.max(0.45, threshold);
+    : negativeCategoryQuery
+      ? Math.max(0.25, threshold)
+      : Math.max(0.45, threshold);
   const profileStrictness = queryProfile?.typo_or_partial_intent ? 0.08 : 0;
   const strictThreshold = Number.isFinite(adaptiveThreshold)
     ? Math.min(0.88, Math.max(baseStrictThreshold, adaptiveThreshold) + profileStrictness)
@@ -1500,11 +1596,16 @@ function parseSimilarityResponse(raw, context = "similarity") {
 }
 
 async function batchGPTSimilarity(rows, searchQuery) {
+  if (!rows || rows.length === 0) return [];
+  if (!searchQuery?.trim()) return [];
 
-  // const list = rows.map(r => ({
-  //   id: r.treatment_id,
-  //   text: `${safeString(r.name)} - ${safeString(r.concern_en)} ${safeString(r.description_en)} ${safeString(r.like_wise_terms)}`.trim() 
-  // }));
+  // ── Cache check ──
+  const cacheKey = `gpt:treatment:${searchQuery.trim().toLowerCase()}:${rows.length}`;
+  const cached = getCachedGPTResult(cacheKey);
+  if (cached) {
+    console.log(`[batchGPTSimilarity] Cache hit for "${searchQuery}" (${rows.length} rows)`);
+    return cached;
+  }
 
   const list = rows.map(r => ({
     id: r.treatment_id,
@@ -1517,65 +1618,7 @@ Related Terms: ${safeString(r.like_wise_terms) || ''}
   `.trim()
   }));
 
-
-//   const prompt = `
-// You are a STRICT treatment similarity engine.
-
-// Your task:
-// Compare the Search Query with the ITEM LIST
-// and score ONLY by direct treatment relevance.
-
-// Search Query: "${searchQuery}"
-
-// Return ONLY this exact JSON:
-// {
-//   "results": [
-//     { "id": string, "score": number }
-//   ]
-// }
-
-// IMPORTANT RULES ABOUT IDs:
-// • You MUST ONLY return IDs from the ITEM LIST.
-// • Never invent or modify an ID.
-// • IDs are strings (UUIDs), NOT numbers.
-// • If unsure, return lower score, not a fake ID.
-
-// STRICT MATCHING RULES:
-// • Exact treatment category match = high score
-// • Different treatment categories = low score
-// • Do NOT match only because both are cosmetic/aesthetic treatments
-// • Botox, fillers, laser, RF, microneedling, peeling are DIFFERENT categories
-// • If query is "laser", then botox/fillers should score below 0.30
-// • If query is "botox", laser treatments should score below 0.30
-
-// SCORING:
-// • 0.90 – 1.00 = nearly exact match
-// • 0.75 – 0.89 = strong related treatment
-// • 0.40 – 0.60 = partial similarity only
-// • Below 0.40 = weak match
-
-// NEGATION RULE:
-// If query contains:
-//   - "non laser"
-//   - "not laser"
-//   - "without laser"
-// Then:
-//   a) Exclude laser-related treatments
-//   b) Match alternative non-laser treatments
-
-// VERY IMPORTANT:
-// • Never give medium/high score to unrelated treatment technologies
-// • Treatment technology matters more than cosmetic purpose
-// • Prefer precision over broad semantic similarity
-
-// ITEM LIST:
-// ${JSON.stringify(list)}
-
-// ALLOWED IDs:
-// ${JSON.stringify(rows.map(r => r.treatment_id))}
-// `;
-
-const prompt = `
+  const prompt = `
 You are a strict similarity scoring engine.
 Your task is to compare each item in the ITEM LIST against the Search Query and assign an accurate similarity score based on intent, keywords, and semantic meaning.
 Search Query: "${searchQuery}"
@@ -1657,9 +1700,14 @@ ${JSON.stringify(rows.map(r => r.treatment_id))}
   if (!res) return [];
 
   const raw = res.choices[0].message.content;
+  const parsed = parseSimilarityResponse(raw, "batchGPTSimilarity");
 
+  // ── Cache store ──
+  if (parsed.length > 0) {
+    setCachedGPTResult(cacheKey, parsed);
+  }
 
-  return parseSimilarityResponse(raw, "batchGPTSimilarity");
+  return parsed;
 }
 
 async function runSubTreatmentSimilarityBatch(batch, searchQuery) {
@@ -1732,12 +1780,21 @@ ${JSON.stringify(batch.map(r => r.sub_treatment_id))}
 }
 
 export async function batchGPTSimilaritySubTreatments(rows, searchQuery, batchSize = 100) {
+  if (!rows || rows.length === 0) return [];
+  if (!searchQuery?.trim()) return [];
+
+  // ── Cache check ──
+  const cacheKey = `gpt:subtreatment:${searchQuery.trim().toLowerCase()}:${rows.length}`;
+  const cached = getCachedGPTResult(cacheKey);
+  if (cached) {
+    console.log(`[batchGPTSimilaritySubTreatments] Cache hit for "${searchQuery}" (${rows.length} rows)`);
+    return cached;
+  }
+
   const batches = [];
   for (let i = 0; i < rows.length; i += batchSize) {
     batches.push(rows.slice(i, i + batchSize));
   }
-
-  // console.log(`Processing ${batches.length} batches in parallel...`);
 
   // Run all batches in parallel
   const batchPromises = batches.map(batch =>
@@ -1745,22 +1802,33 @@ export async function batchGPTSimilaritySubTreatments(rows, searchQuery, batchSi
   );
 
   const results = await Promise.all(batchPromises);
+  const flat = results.flat();
 
-  // Optional debugging
-  results.forEach((partial, idx) => {
-  });
+  // ── Cache store ──
+  if (flat.length > 0) {
+    setCachedGPTResult(cacheKey, flat);
+  }
 
-  return results.flat();
+  return flat;
 }
 
 
 export async function batchDeviceGPTSimilarity(rows, searchQuery, batchSize = 100) {
+  if (!rows || rows.length === 0) return [];
+  if (!searchQuery?.trim()) return [];
+
+  // ── Cache check ──
+  const cacheKey = `gpt:device:${searchQuery.trim().toLowerCase()}:${rows.length}`;
+  const cached = getCachedGPTResult(cacheKey);
+  if (cached) {
+    console.log(`[batchDeviceGPTSimilarity] Cache hit for "${searchQuery}" (${rows.length} rows)`);
+    return cached;
+  }
+
   const batches = [];
   for (let i = 0; i < rows.length; i += batchSize) {
     batches.push(rows.slice(i, i + batchSize));
   }
-
-  // console.log(`Processing ${batches.length} batches in parallel...`);
 
   // Process all batches in parallel
   const batchPromises = batches.map(batch =>
@@ -1768,13 +1836,14 @@ export async function batchDeviceGPTSimilarity(rows, searchQuery, batchSize = 10
   );
 
   const results = await Promise.all(batchPromises);
+  const flat = results.flat();
 
-  // Log each partial result
-  results.forEach(partial => {
-    // console.log("partial device", partial);
-  });
+  // ── Cache store ──
+  if (flat.length > 0) {
+    setCachedGPTResult(cacheKey, flat);
+  }
 
-  return results.flat();
+  return flat;
 }
 
 
@@ -1922,6 +1991,14 @@ export async function runGPTSimilarity(rows, searchQuery, options = {}) {
   if (!rows || rows.length === 0) return [];
   if (!searchQuery?.trim()) return [];
 
+  // ── Cache check: same query + same row count = same results ──
+  const cacheKey = `gpt:${idField}:${searchQuery.trim().toLowerCase()}:${rows.length}`;
+  const cached = getCachedGPTResult(cacheKey);
+  if (cached) {
+    console.log(`[runGPTSimilarity] Cache hit for "${searchQuery}" (${rows.length} rows)`);
+    return cached;
+  }
+
   // Split into batches
   const batches = [];
   for (let i = 0; i < rows.length; i += batchSize) {
@@ -1935,14 +2012,21 @@ export async function runGPTSimilarity(rows, searchQuery, options = {}) {
     batches.map(batch =>
       runSingleBatch(batch, searchQuery, idField, textFields)
         .catch(err => {
-          console.error("Batch failed:", err);
+          console.error("Batch failed:", err?.message || err);
           return []; // return empty so other batches still succeed
         })
     )
   );
 
   // Flatten result arrays
-  return results.flat();
+  const flat = results.flat();
+
+  // ── Cache store ──
+  if (flat.length > 0) {
+    setCachedGPTResult(cacheKey, flat);
+  }
+
+  return flat;
 }
 
 
