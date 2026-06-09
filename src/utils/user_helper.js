@@ -5,7 +5,7 @@ import base64url from 'base64url';
 import dotenv from "dotenv";
 import dayjs from 'dayjs';
 import axios from 'axios';
-import { protectTermsInText, restoreProtectedTerms } from "../search/protected_terms.js";
+import { protectTermsInText, restoreProtectedTerms, restoreCanonicalBrandTerms } from "../search/protected_terms.js";
 dotenv.config();
 const APP_URL = process.env.APP_URL;
 
@@ -191,9 +191,10 @@ export const getAppointmentDetails = async (userId, appointmentId) => {
 //     }
 // };
 
-export const googleTranslator = async(question, targetLang) => {
+export const googleTranslator = async (question, targetLang) => {
     try {
-        const { protectedText, map } = protectTermsInText(question || "");
+        const restored = restoreCanonicalBrandTerms(question || "");
+        const { protectedText, map } = protectTermsInText(restored);
         const url = `https://translation.googleapis.com/language/translate/v2?key=${process.env.GOOGLE_TRANSLATE_KEY}`;
         const body = {
             q: protectedText,

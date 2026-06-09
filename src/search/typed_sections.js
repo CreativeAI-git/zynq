@@ -89,6 +89,14 @@ function compact(value = "") {
   return normalizeProtectedAlias(value).replace(/\s+/g, "");
 }
 
+const IGNORED_ENTITY_TOKENS = new Set([
+  "manual", "manuell", "automatic", "automatisk",
+  "treatment", "behandling", "device", "apparat", "apparatus",
+  "machine", "maskin", "system", "facial", "peel", "peeling",
+  "skin", "hud", "care", "vard", "vård", "body", "kropp", "therapy", "terapi",
+  "with", "med", "without", "utan", "needling", "nalning", "nålning"
+]);
+
 function getQueryEntityTokens(queryInfo = {}) {
   const queryTokens = normalizeSearchText(queryInfo?.normalized || queryInfo?.raw || "")
     .split(/\s+/)
@@ -98,7 +106,9 @@ function getQueryEntityTokens(queryInfo = {}) {
     .filter(Boolean);
   const intentTokenSet = new Set(intentTokens);
 
-  return queryTokens.filter((token) => !intentTokenSet.has(token));
+  return queryTokens
+    .filter((token) => !intentTokenSet.has(token))
+    .filter((token) => !IGNORED_ENTITY_TOKENS.has(token));
 }
 
 function hasQueryEntityTokenMatch(row = {}, queryInfo = {}) {

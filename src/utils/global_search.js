@@ -158,6 +158,12 @@ function detectCanonicalIntent(rawSearch = "") {
   };
 }
 
+function buildNegationAwareSearchText(queryInfo, fallbackSearch = "") {
+  const hint = String(queryInfo?.negationSearchHint || "").trim();
+  if (hint) return hint;
+  return String(fallbackSearch || "").trim();
+}
+
 function buildTreatmentMatchText(row = {}) {
   return normalizeText([
     row.name,
@@ -170,7 +176,9 @@ function buildTreatmentMatchText(row = {}) {
     row.device_name,
     row.device_name_swedish,
     row.benefits_en,
-    row.benefits_sv
+    row.benefits_sv,
+    row.concern_name,
+    row.concern_swedish
   ].filter(Boolean).join(" "));
 }
 
@@ -429,6 +437,13 @@ export const getTreatmentsAIResult = async (
   const queryProfile = options?.queryProfile || null;
   const adaptiveThreshold = Number(options?.adaptiveThreshold ?? NaN);
   const adaptiveCap = Number(options?.adaptiveCap ?? NaN);
+  const rankingSearch = buildNegationAwareSearchText(queryInfo, queryInfo.normalized);
+  const negativeCategoryQuery = Boolean(
+    queryInfo?.hasNegation &&
+    !queryInfo?.canonicalIntent &&
+    Array.isArray(queryInfo?.negationTargets) &&
+    queryInfo.negationTargets.length > 0
+  );
   const cacheKey = buildTreatmentCacheKey(queryInfo, rows, threshold);
   const cachedRankings = getCachedTreatmentRankings(cacheKey);
 
@@ -524,28 +539,41 @@ export const getTreatmentsAIResult = async (
 
     // For mapped intents (strict/broad), keep ranking deterministic and language-independent.
     // Use semantic model only for general/free-form queries.
-    const shouldUseSemantic = queryInfo.intentType === "general";
+    const shouldUseSemantic =
+      queryInfo.intentType === "general" &&
+      (
+        (
+          (queryInfo.intentConfidence ?? 0) >= 0.55 &&
+          normalizeText(queryInfo.normalized).split(/\s+/).filter(Boolean).length >= 2
+        ) ||
+        negativeCategoryQuery
+      );
 
     const gptCandidates = shouldUseSemantic
       ? guarded
       : [];
 
     const scoreResults = (shouldUseSemantic && gptCandidates.length)
-      ? await batchGPTSimilarity(gptCandidates, queryInfo.normalized)
+      ? await batchGPTSimilarity(gptCandidates, rankingSearch)
       : [];
 
     const scoreMap = new Map(scoreResults.map((r) => [r.id, r.score]));
 
     const scored = guarded.map((r) => {
       const gptScore = scoreMap.get(r.treatment_id) ?? 0;
-      const lexical = r._lexicalScore;
 
-      const exactCategoryHit = queryInfo.strictIntent && isRowInIntentCategory(r._matchText, r, queryInfo);
+      const categoryHit = isRowInIntentCategory(r._matchText, r, queryInfo);
+      let lexical = r._lexicalScore;
+      if (queryInfo.canonicalIntent && categoryHit) {
+        lexical = Math.max(lexical, 0.72);
+      }
+
+      const exactCategoryHit = queryInfo.strictIntent && categoryHit;
       const intentScore = exactCategoryHit ? 1 : (queryInfo.canonicalIntent ? 0.25 : 0.5);
       const categoryScore = queryInfo.canonicalIntent
-        ? (isRowInIntentCategory(r._matchText, r, queryInfo) ? 1 : 0)
+        ? (categoryHit ? 1 : 0)
         : 0.7;
-      const penaltyScore = queryInfo.canonicalIntent && !isRowInIntentCategory(r._matchText, r, queryInfo)
+      const penaltyScore = queryInfo.canonicalIntent && !categoryHit
         ? 0.6
         : 0;
       const weightedScore = (0.58 * lexical) + (0.14 * gptScore) + (0.18 * intentScore) + (0.10 * categoryScore) - penaltyScore;
@@ -676,11 +704,26 @@ export const getSubTreatmentsAIResult = async (
 
   const queryInfo = detectCanonicalIntent(search);
   const normalizedSearch = queryInfo.normalized;
+  const rankingSearch = buildNegationAwareSearchText(queryInfo, normalizedSearch);
+  const negativeCategoryQuery = Boolean(
+    queryInfo?.hasNegation &&
+    !queryInfo?.canonicalIntent &&
+    Array.isArray(queryInfo?.negationTargets) &&
+    queryInfo.negationTargets.length > 0
+  );
 
   // ----- Step 1: GPT similarity -----
-  const shouldUseSemantic = queryInfo.intentType === "general";
+  const shouldUseSemantic =
+    queryInfo.intentType === "general" &&
+    (
+      (
+        (queryInfo.intentConfidence ?? 0) >= 0.55 &&
+        normalizeText(queryInfo.normalized).split(/\s+/).filter(Boolean).length >= 2
+      ) ||
+      negativeCategoryQuery
+    );
   const gptScoreResults = shouldUseSemantic
-    ? await batchGPTSimilaritySubTreatments(rows, normalizedSearch)
+    ? await batchGPTSimilaritySubTreatments(rows, rankingSearch)
     : [];
 
   const gptScoreMap = new Map();
@@ -693,10 +736,13 @@ export const getSubTreatmentsAIResult = async (
     const treatmentSv = normalizeText(r.treatment_swedish || "");
     const text = normalizeText(`${nameEn} ${treatmentEn} ${treatmentSv}`);
 
-    const nameScore = computeLexicalScore(text, queryInfo, {
+    let nameScore = computeLexicalScore(text, queryInfo, {
       name: r.name,
       swedish: r.swedish
     });
+    if (queryInfo.canonicalIntent && isRowInIntentCategory(text, r, queryInfo)) {
+      nameScore = Math.max(nameScore, 0.72);
+    }
     const gptScore = gptScoreMap.get(r.sub_treatment_id) || 0;
 
     const categoryHit = queryInfo.strictIntent
@@ -727,7 +773,7 @@ export const getSubTreatmentsAIResult = async (
     .filter(r => r._categoryHit)
     .filter(r => queryInfo.intentType === "strict_category"
       ? (r.final_score >= Math.max(0.52, threshold) || r.name_score >= 0.78)
-      : r.final_score >= Math.max(0.40, threshold))
+      : r.final_score >= Math.max(negativeCategoryQuery ? 0.22 : 0.40, threshold))
     .sort((a, b) => b.final_score - a.final_score);
 
   // ----- Step 5: Translate if needed -----
@@ -1269,22 +1315,37 @@ export const getDevicesAIResult = async (
   const queryProfile = options?.queryProfile || null;
   const adaptiveThreshold = Number(options?.adaptiveThreshold ?? NaN);
   const adaptiveCap = Number(options?.adaptiveCap ?? NaN);
+  const rankingSearch = buildNegationAwareSearchText(queryInfo, normalizedSearch);
+  const negativeCategoryQuery = Boolean(
+    queryInfo?.hasNegation &&
+    !queryInfo?.canonicalIntent &&
+    Array.isArray(queryInfo?.negationTargets) &&
+    queryInfo.negationTargets.length > 0
+  );
 
   const guardedRows = rows
     .map((r) => ({ ...r, _matchText: buildDeviceMatchText(r) }))
     .filter((r) => !isRowExcludedByNegation(r._matchText, queryInfo))
     .filter((r) => isTextAllowedForIntent(r._matchText, queryInfo) || hasDeviceEntityTokenMatch(r, queryInfo));
 
-  const shouldUseSemantic = queryInfo.intentType === "general";
+  const shouldUseSemantic =
+    queryInfo.intentType === "general" &&
+    (
+      (
+        (queryInfo.intentConfidence ?? 0) >= 0.55 &&
+        normalizeText(queryInfo.normalized).split(/\s+/).filter(Boolean).length >= 2
+      ) ||
+      negativeCategoryQuery
+    );
   const gptScoreResults = shouldUseSemantic
-    ? await batchDeviceGPTSimilarity(guardedRows, normalizedSearch)
+    ? await batchDeviceGPTSimilarity(guardedRows, rankingSearch)
     : [];
   const gptScoreMap = new Map(gptScoreResults.map((r) => [r.id, r.score]));
 
   const scored = guardedRows.map((r) => {
     const gptScore = gptScoreMap.get(r.id) ?? 0;
-    const nameScore = computeDeviceNameScore(r.device_name, normalizedSearch);
-    const swedishNameScore = computeDeviceNameScore(r.device_swedish, normalizedSearch);
+    const nameScore = computeDeviceNameScore(r.device_name, rankingSearch);
+    const swedishNameScore = computeDeviceNameScore(r.device_swedish, rankingSearch);
     const combinedNameScore = Math.max(nameScore, swedishNameScore);
     const metadataScore = Math.max(
       computeDeviceNameScore(r.classification_type, normalizedSearch),
@@ -1325,7 +1386,9 @@ export const getDevicesAIResult = async (
     ? Math.max(0.62, threshold)
     : queryInfo.canonicalIntent
       ? Math.max(0.50, threshold)
-    : Math.max(0.45, threshold);
+    : negativeCategoryQuery
+      ? Math.max(0.25, threshold)
+      : Math.max(0.45, threshold);
   const profileStrictness = queryProfile?.typo_or_partial_intent ? 0.08 : 0;
   const strictThreshold = Number.isFinite(adaptiveThreshold)
     ? Math.min(0.88, Math.max(baseStrictThreshold, adaptiveThreshold) + profileStrictness)

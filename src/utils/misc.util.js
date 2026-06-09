@@ -96,14 +96,14 @@ export const getTreatmentIDsByUserID = async (userID) => {
 
     // STEP 1: SCORE INFO (PRIMARY PRIORITY)
     const parsedScoreInfo = safeJSONParse(scoreInfo);
-    
+
     if (parsedScoreInfo && mapping && skinConcernMap) {
 
         const concernIDs = [];
 
         for (const key in mapping) {
             const value = parseFloat(parsedScoreInfo[key]);
-            
+
             if (value > SCORE_THRESHOLD) {
                 const concernName = mapping[key];
                 const concernID = skinConcernMap[concernName];
@@ -659,6 +659,7 @@ export async function localizeTextValue(value, language = "en") {
 
         return restoreCanonicalBrandTerms(translated);
     } catch (error) {
+        console.error("localizeTextValue error:=====>", error);
         console.error("localizeTextValue error:", error?.response?.data || error?.message || error);
         return value;
     }
@@ -677,99 +678,99 @@ function shouldSkipTranslation(text) {
 }
 
 export const applyLanguageOverwrite = (data, lang = "en") => {
-  // recursive function
-  const transform = (obj) => {
-    if (Array.isArray(obj)) {
-      return obj.map(transform);
-    }
-
-    if (obj && typeof obj === "object") {
-      const newObj = { ...obj };
-
-      for (const key in newObj) {
-        const value = newObj[key];
-
-        // Recurse deeper
-        if (typeof value === "object" && value !== null) {
-          newObj[key] = transform(value);
+    // recursive function
+    const transform = (obj) => {
+        if (Array.isArray(obj)) {
+            return obj.map(transform);
         }
-      }
 
-      // Auto-detect language key pairs inside this object
-      const pairs = findLanguagePairs(newObj);
+        if (obj && typeof obj === "object") {
+            const newObj = { ...obj };
 
-      // Apply overwrite for each pair
-      pairs.forEach(({ keyBase, enKey, svKey }) => {
-        if (lang === "en" && enKey in newObj) {
-          newObj[keyBase] = newObj[enKey];
+            for (const key in newObj) {
+                const value = newObj[key];
+
+                // Recurse deeper
+                if (typeof value === "object" && value !== null) {
+                    newObj[key] = transform(value);
+                }
+            }
+
+            // Auto-detect language key pairs inside this object
+            const pairs = findLanguagePairs(newObj);
+
+            // Apply overwrite for each pair
+            pairs.forEach(({ keyBase, enKey, svKey }) => {
+                if (lang === "en" && enKey in newObj) {
+                    newObj[keyBase] = newObj[enKey];
+                }
+                if (lang === "sv" && svKey in newObj) {
+                    newObj[keyBase] = newObj[svKey];
+                }
+            });
+
+            // Keep protected brand/device names canonical after language overwrite.
+            for (const key in newObj) {
+                if (typeof newObj[key] === "string") {
+                    newObj[key] = restoreCanonicalBrandTerms(newObj[key]);
+                }
+            }
+
+            return newObj;
         }
-        if (lang === "sv" && svKey in newObj) {
-          newObj[keyBase] = newObj[svKey];
-        }
-      });
 
-      // Keep protected brand/device names canonical after language overwrite.
-      for (const key in newObj) {
-        if (typeof newObj[key] === "string") {
-          newObj[key] = restoreCanonicalBrandTerms(newObj[key]);
-        }
-      }
+        return obj;
+    };
 
-      return newObj;
-    }
-
-    return obj;
-  };
-
-  return transform(data);
+    return transform(data);
 };
 
 // Detect matching language pairs automatically
 const findLanguagePairs = (obj) => {
-  const keys = Object.keys(obj);
-  const pairs = [];
+    const keys = Object.keys(obj);
+    const pairs = [];
 
-  keys.forEach((key) => {
-    // Pattern 1: base + _en / _sv
-    if (key.endsWith("_en")) {
-      const base = key.replace("_en", "");
-      const svKey = base + "_sv";
-      if (obj.hasOwnProperty(svKey)) {
-        pairs.push({ keyBase: base, enKey: key, svKey });
-      }
-    }
+    keys.forEach((key) => {
+        // Pattern 1: base + _en / _sv
+        if (key.endsWith("_en")) {
+            const base = key.replace("_en", "");
+            const svKey = base + "_sv";
+            if (obj.hasOwnProperty(svKey)) {
+                pairs.push({ keyBase: base, enKey: key, svKey });
+            }
+        }
 
-    // Pattern 2: english / swedish
-    if (key.toLowerCase() === "english") {
-      if (obj.hasOwnProperty("swedish")) {
-        pairs.push({
-          keyBase: "name", // output field name
-          enKey: key,
-          svKey: "swedish",
-        });
-      }
-    }
+        // Pattern 2: english / swedish
+        if (key.toLowerCase() === "english") {
+            if (obj.hasOwnProperty("swedish")) {
+                pairs.push({
+                    keyBase: "name", // output field name
+                    enKey: key,
+                    svKey: "swedish",
+                });
+            }
+        }
 
-    // Pattern 3: name + swedish
-    if (key === "name" && obj.hasOwnProperty("swedish")) {
-      pairs.push({
-        keyBase: "name",
-        enKey: "name",
-        svKey: "swedish",
-      });
-    }
+        // Pattern 3: name + swedish
+        if (key === "name" && obj.hasOwnProperty("swedish")) {
+            pairs.push({
+                keyBase: "name",
+                enKey: "name",
+                svKey: "swedish",
+            });
+        }
 
-    // Pattern 4: description_en / desc_sv
-    if (key.endsWith("_en")) {
-      const svKey = key.replace("_en", "_sv");
-      if (obj.hasOwnProperty(svKey)) {
-        const base = key.replace("_en", "");
-        pairs.push({ keyBase: base, enKey: key, svKey });
-      }
-    }
-  });
+        // Pattern 4: description_en / desc_sv
+        if (key.endsWith("_en")) {
+            const svKey = key.replace("_en", "_sv");
+            if (obj.hasOwnProperty(svKey)) {
+                const base = key.replace("_en", "");
+                pairs.push({ keyBase: base, enKey: key, svKey });
+            }
+        }
+    });
 
-  return pairs;
+    return pairs;
 };
 
 
