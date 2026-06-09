@@ -127,7 +127,7 @@ async function localizeDeviceSearchResult(device = {}, language = "en") {
         device_swedish: resolveProtectedDisplayName(baseDeviceName, baseDeviceName),
         treatment_name: restoreCanonicalBrandTerms(treatmentName),
         treatment_swedish: restoreCanonicalBrandTerms(treatmentSwedish),
-        associated_treatments: (device.associated_treatments || []).map((treatment) => {
+        associated_treatments: (device.associated_treatments || []).map(async (treatment) => {
             const base = treatment?.name || treatment?.swedish || "";
             const { protectedText: protectedBase, map: baseMap } = protectTermsInText(base);
             const [localizedName, localizedSwedish] = await Promise.all([
@@ -678,7 +678,7 @@ export const getSingleDoctorRatings = asyncHandler(async (req, res) => {
 export const search_home_entities = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    const { search, page, limit, debugSearch } = getSearchRequestContext(req);
+    // const { search, page, limit, debugSearch } = getSearchRequestContext(req);
     const { search, page, limit, debugSearch } = getSearchRequestContext(req);
 
     if (!search) {
@@ -686,7 +686,7 @@ export const search_home_entities = asyncHandler(async (req, res) => {
     }
 
     try {
-        const normalized_search = await normalizeSearchQuery(search, language, true);
+        // const normalized_search = await normalizeSearchQuery(search, language, true);
         const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
@@ -763,13 +763,13 @@ export const search_home_entities = asyncHandler(async (req, res) => {
             relatedDefaultPriority: 2
         });
 
-        const localizedDevices = await Promise.all(
-            mergedDevices.map((device) => localizeDeviceSearchResult(device, language))
-        );
+        // const localizedDevices = await Promise.all(
+        //     mergedDevices.map((device) => localizeDeviceSearchResult(device, language))
+        // );
 
-        const localizedSubTreatments = await Promise.all(
-            mergedSubTreatments.map((subTreatment) => localizeSubTreatmentSearchResult(subTreatment, language))
-        );
+        // const localizedSubTreatments = await Promise.all(
+        //     mergedSubTreatments.map((subTreatment) => localizeSubTreatmentSearchResult(subTreatment, language))
+        // );
 
         const localizedDevices = await Promise.all(
             mergedDevices.map((device) => localizeDeviceSearchResult(device, language))
@@ -1096,7 +1096,7 @@ async function detectSearchIntent(searchQuery) {
 export const detectSearchIntentController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    const { search } = getSearchRequestContext(req);
+    // const { search } = getSearchRequestContext(req);
     const { search } = getSearchRequestContext(req);
 
     if (!search) {
@@ -1104,7 +1104,7 @@ export const detectSearchIntentController = asyncHandler(async (req, res) => {
     }
 
     try {
-        const normalized_search = await normalizeSearchQuery(search, language, true);
+        // const normalized_search = await normalizeSearchQuery(search, language, true);
         const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
@@ -1132,7 +1132,7 @@ export const detectSearchIntentController = asyncHandler(async (req, res) => {
 export const getDoctorsByFirstNameSearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    const { search, page, limit } = getSearchRequestContext(req);
+    // const { search, page, limit } = getSearchRequestContext(req);
     const { search, page, limit } = getSearchRequestContext(req);
 
     if (!search) {
@@ -1140,7 +1140,7 @@ export const getDoctorsByFirstNameSearchOnlyController = asyncHandler(async (req
     }
 
     try {
-        const normalized_search = await normalizeSearchQuery(search, language, true);
+        // const normalized_search = await normalizeSearchQuery(search, language, true);
         const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
@@ -1175,7 +1175,7 @@ export const getDoctorsByFirstNameSearchOnlyController = asyncHandler(async (req
 export const getClinicsByNameSearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    const { search, page, limit } = getSearchRequestContext(req);
+    // const { search, page, limit } = getSearchRequestContext(req);
     const { search, page, limit } = getSearchRequestContext(req);
 
     if (!search) {
@@ -1183,7 +1183,7 @@ export const getClinicsByNameSearchOnlyController = asyncHandler(async (req, res
     }
 
     try {
-        const normalized_search = await normalizeSearchQuery(search, language, true);
+        // const normalized_search = await normalizeSearchQuery(search, language, true);
         const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
@@ -1219,7 +1219,7 @@ export const getClinicsByNameSearchOnlyController = asyncHandler(async (req, res
 export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    const { search, page, limit } = getSearchRequestContext(req);
+    // const { search, page, limit } = getSearchRequestContext(req);
     const { search, page, limit } = getSearchRequestContext(req);
 
     if (!search) {
@@ -1227,7 +1227,7 @@ export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res
     }
 
     try {
-        const normalized_search = await normalizeSearchQuery(search, language, true);
+        // const normalized_search = await normalizeSearchQuery(search, language, true);
         const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
@@ -1261,7 +1261,7 @@ export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res
 
 export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
-    const { search, page, limit, debugSearch } = getSearchRequestContext(req);
+    // const { search, page, limit, debugSearch } = getSearchRequestContext(req);
     const { search, page, limit, debugSearch } = getSearchRequestContext(req);
 
     if (!search) {
@@ -1269,7 +1269,7 @@ export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res)
     }
 
     try {
-        const normalized_search = await normalizeSearchQuery(search, language, true);
+        // const normalized_search = await normalizeSearchQuery(search, language, true);
         const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
@@ -1346,7 +1346,7 @@ export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res)
 export const getSubtreatmentsBySearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    const { search, page, limit } = getSearchRequestContext(req);
+    // const { search, page, limit } = getSearchRequestContext(req);
     const { search, page, limit } = getSearchRequestContext(req);
 
     if (!search) {
@@ -1354,7 +1354,7 @@ export const getSubtreatmentsBySearchOnlyController = asyncHandler(async (req, r
     }
 
     try {
-        const normalized_search = await normalizeSearchQuery(search, language, true);
+        // const normalized_search = await normalizeSearchQuery(search, language, true);
         const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
@@ -1365,7 +1365,7 @@ export const getSubtreatmentsBySearchOnlyController = asyncHandler(async (req, r
 
 
         // 2️⃣ Run all searches
-        const queryInfo = parseSearchIntent(normalized_search || search);
+        // const queryInfo = parseSearchIntent(normalized_search || search);
         const queryInfo = parseSearchIntent(normalized_search || search);
 
         const [devices, treatments, subtreatments] = await Promise.all([
@@ -1378,14 +1378,14 @@ export const getSubtreatmentsBySearchOnlyController = asyncHandler(async (req, r
             minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
         });
 
-        const relationExpansion = shouldExpandRelatedSearch(queryInfo, normalized_search)
-            ? await userModels.getRelationshipAwareSearchExpansion({
-                search: normalized_search,
-                language,
-                seedDevices: typedPrimaryDevices.accepted,
-                seedTreatments: treatments
-            })
-            : { devices: [], treatments: [], doctors: [], clinics: [], debug: {} };
+        // const relationExpansion = shouldExpandRelatedSearch(queryInfo, normalized_search)
+        //     ? await userModels.getRelationshipAwareSearchExpansion({
+        //         search: normalized_search,
+        //         language,
+        //         seedDevices: typedPrimaryDevices.accepted,
+        //         seedTreatments: treatments
+        //     })
+        //     : { devices: [], treatments: [], doctors: [], clinics: [], debug: {} };
         const relationExpansion = shouldExpandRelatedSearch(queryInfo, normalized_search)
             ? await userModels.getRelationshipAwareSearchExpansion({
                 search: normalized_search,
