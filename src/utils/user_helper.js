@@ -202,11 +202,15 @@ export const googleTranslator = async (question, targetLang) => {
             format: 'text'
         };
 
-        const resp = await axios.post(url, body);
+        const resp = await axios.post(url, body, {
+            timeout: Number(process.env.TRANSLATE_TIMEOUT_MS || 3500)
+        });
         const translated = resp.data.data.translations[0].translatedText;
         return restoreProtectedTerms(translated, map);
     } catch (err) {
-        console.error('Translate error:', err.response?.data || err.message);
+        if (process.env.SEARCH_DEBUG_LOGS === "true") {
+            console.error('Translate error:', err.response?.data || err.message);
+        }
         throw err;
     }
 };

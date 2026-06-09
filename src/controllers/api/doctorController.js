@@ -16,7 +16,7 @@ import { translator } from "../../utils/misc.util.js";
 import { mergeGraphAwareResults } from "../../utils/search_graph.util.js";
 import { parseSearchIntent } from "../../search/intent_taxonomy.js";
 import { enforceDeviceSectionCandidates } from "../../search/typed_sections.js";
-import { containsProtectedTerm, protectTermsInText, restoreProtectedTerms, resolveProtectedDisplayName } from "../../search/protected_terms.js";
+import { containsProtectedTerm, protectTermsInText, restoreProtectedTerms, resolveProtectedDisplayName, restoreCanonicalBrandTerms } from "../../search/protected_terms.js";
 
 
 /**
@@ -98,60 +98,36 @@ async function localizeClinicSearchResult(clinic = {}, language = "en") {
 }
 
 async function localizeDeviceSearchResult(device = {}, language = "en") {
-    // device_name is a single brand name — protect it from translation
     const baseDeviceName = device.device_name || device.device_swedish || "";
-
-    // treatment_name may be a GROUP_CONCAT comma-separated string like "Pico Laser,Botox,IPL"
-    // Protect brand terms → localize each part → restore protected terms
-    const localizeCommaSeparated = async (str, lang) => {
-        if (!str) return str;
-        const parts = String(str).split(",").map(s => s.trim()).filter(Boolean);
-        const localized = await Promise.all(parts.map(async (p) => {
-            const { protectedText, map } = protectTermsInText(p);
-            const translated = await localizeTextValue(protectedText, lang);
-            return restoreProtectedTerms(translated, map);
-        }));
-        return localized.join(", ");
-    };
-
-    const baseTreatmentName = device.treatment_name || device.treatment_swedish || "";
-    const baseTreatmentSwedish = device.treatment_swedish || device.treatment_name || "";
-
-    const [treatmentNameLocalized, treatmentSwedishLocalized] = await Promise.all([
-        localizeCommaSeparated(baseTreatmentName, language),
-        localizeCommaSeparated(baseTreatmentSwedish, "sv")
-    ]);
+    const treatmentName = language === "sv"
+        ? (device.treatment_swedish || device.treatment_name || "")
+        : (device.treatment_name || device.treatment_swedish || "");
+    const treatmentSwedish = device.treatment_swedish || device.treatment_name || "";
 
     return {
         ...device,
-        // Device names are brand terms — preserve canonical casing, do NOT translate
         device_name: resolveProtectedDisplayName(baseDeviceName, baseDeviceName),
         device_swedish: resolveProtectedDisplayName(baseDeviceName, baseDeviceName),
-        treatment_name: treatmentNameLocalized,
-        treatment_swedish: treatmentSwedishLocalized,
-        associated_treatments: await Promise.all((device.associated_treatments || []).map(async (treatment) => {
+        treatment_name: restoreCanonicalBrandTerms(treatmentName),
+        treatment_swedish: restoreCanonicalBrandTerms(treatmentSwedish),
+        associated_treatments: (device.associated_treatments || []).map((treatment) => {
             const base = treatment?.name || treatment?.swedish || "";
-            const { protectedText: protectedBase, map: baseMap } = protectTermsInText(base);
-            const [localizedName, localizedSwedish] = await Promise.all([
-                localizeTextValue(protectedBase, language).then(t => restoreProtectedTerms(t, baseMap)),
-                localizeTextValue(protectedBase, "sv").then(t => restoreProtectedTerms(t, baseMap))
-            ]);
             return {
                 ...treatment,
-                name: resolveProtectedDisplayName(base, localizedName),
-                swedish: resolveProtectedDisplayName(base, localizedSwedish)
+                name: resolveProtectedDisplayName(base, language === "sv" ? (treatment?.swedish || base) : base),
+                swedish: resolveProtectedDisplayName(base, treatment?.swedish || base)
             };
-        }))
+        })
     };
 }
 
 async function localizeSubTreatmentSearchResult(subTreatment = {}, language = "en") {
     return {
         ...subTreatment,
-        name: await localizeTextValue(subTreatment.name || subTreatment.swedish || "", language),
-        swedish: await localizeTextValue(subTreatment.swedish || subTreatment.name || "", "sv"),
-        treatment_name: await localizeTextValue(subTreatment.treatment_name || subTreatment.treatment_swedish || "", language),
-        treatment_swedish: await localizeTextValue(subTreatment.treatment_swedish || subTreatment.treatment_name || "", "sv")
+        name: restoreCanonicalBrandTerms(language === "sv" ? (subTreatment.swedish || subTreatment.name || "") : (subTreatment.name || subTreatment.swedish || "")),
+        swedish: restoreCanonicalBrandTerms(subTreatment.swedish || subTreatment.name || ""),
+        treatment_name: restoreCanonicalBrandTerms(language === "sv" ? (subTreatment.treatment_swedish || subTreatment.treatment_name || "") : (subTreatment.treatment_name || subTreatment.treatment_swedish || "")),
+        treatment_swedish: restoreCanonicalBrandTerms(subTreatment.treatment_swedish || subTreatment.treatment_name || "")
     };
 }
 
@@ -202,6 +178,14 @@ function shouldExpandRelatedSearch(queryInfo = {}, search = "") {
     const confidence = Number(queryInfo?.confidence ?? 0);
     const tokenCount = normalized.split(/\s+/).filter(Boolean).length;
     return confidence >= 0.70 || tokenCount >= 2;
+}
+
+function shouldRunRelationshipExpansion(queryInfo = {}, search = "", devices = [], treatments = []) {
+    if (!shouldExpandRelatedSearch(queryInfo, search)) return false;
+    const deviceCount = Array.isArray(devices) ? devices.length : 0;
+    const treatmentCount = Array.isArray(treatments) ? treatments.length : 0;
+    if (queryInfo?.canonicalIntent && deviceCount >= 8 && treatmentCount >= 8) return false;
+    return true;
 }
 
 
@@ -700,7 +684,6 @@ export const search_home_entities = asyncHandler(async (req, res) => {
         if (intentRanking.type === "gibberish") {
             return handleSuccess(res, 200, "en", "No Data Found", []);
         }
-        console.log("Search Intent Ranking:", intentRanking);
         const queryInfo = parseSearchIntent(normalized_search || search);
 
         // 2️⃣ Run all searches (as you already do)
@@ -718,7 +701,7 @@ export const search_home_entities = asyncHandler(async (req, res) => {
         });
 
         // 2b) Relationship-aware graph expansion (device <-> treatment + mapped neighbors)
-        const relationExpansion = shouldExpandRelatedSearch(queryInfo, normalized_search)
+        const relationExpansion = shouldRunRelationshipExpansion(queryInfo, normalized_search, typedPrimaryDevices.accepted, treatments)
             ? await userModels.getRelationshipAwareSearchExpansion({
                 search: normalized_search,
                 language,
@@ -893,13 +876,10 @@ export const search_home_entities = asyncHandler(async (req, res) => {
 });
 
 async function detectSearchIntent(searchQuery) {
-    console.log("🔍 Raw search query:", searchQuery);
-
     const trimmed = (searchQuery || "").trim().toLowerCase();
 
     // ✅ Special handling for "dr" or similar inputs
     if (["dr", "dr.", "doctor", "daktar"].includes(trimmed)) {
-        console.log("⚙️ Detected doctor keyword — prioritizing Doctor ranking");
         return {
             type: "valid_medical",
             ranking: ["Doctor", "Clinic", "Treatment", "Sub Treatment", "Devices",]
@@ -908,7 +888,6 @@ async function detectSearchIntent(searchQuery) {
 
     // ✅ Special handling for queries implying expert → prioritize doctors
     if (["expert", "skin expert", "hair expert", "face expert", "derma expert"].includes(trimmed)) {
-        console.log("⚙️ Detected expert keyword — prioritizing Doctor ranking");
         return {
             type: "valid_medical",
             ranking: ["Doctor", "Clinic", "Treatment", "Sub Treatment", "Devices"]
@@ -916,7 +895,6 @@ async function detectSearchIntent(searchQuery) {
     }
 
     if (/\b(dark circles|mörka ringar|morka ringar|under eye|under eyes|eye bags)\b/i.test(trimmed)) {
-        console.log("⚙️ Detected under-eye concern — prioritizing Treatment ranking");
         return {
             type: "valid_medical",
             ranking: ["Treatment", "Sub Treatment", "Clinic", "Doctor", "Devices"]
@@ -924,7 +902,6 @@ async function detectSearchIntent(searchQuery) {
     }
 
     if (/\b(laser|laserbehandling|laser behandling|ipl|fotona|morpheus8|lasermd|nd:?yag|prp)\b/i.test(trimmed)) {
-        console.log("⚙️ Detected laser/device keyword — prioritizing Devices ranking");
         return {
             type: "valid_medical",
             ranking: ["Devices", "Treatment", "Sub Treatment", "Clinic", "Doctor"]
@@ -934,7 +911,6 @@ async function detectSearchIntent(searchQuery) {
 
     // 🛑 Short queries fallback
     if (trimmed.length <= 3) {
-        console.log("⚙️ Skipping AI — short query, returning default valid_medical");
         return {
             type: "valid_medical",
             ranking: ["Treatment", "Sub Treatment", "Doctor", "Clinic", "Devices"]
@@ -1044,7 +1020,6 @@ async function detectSearchIntent(searchQuery) {
     });
 
     let content = response.choices[0].message.content.trim();
-    console.log("🧠 Raw AI output:", content);
 
     content = content
         .replace(/```json/gi, "")
@@ -1256,7 +1231,6 @@ export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res)
 
         // 2️⃣ Run all searches
         const queryInfo = parseSearchIntent(normalized_search || search);
-        console.log("[TREATMENT API DEBUG] queryInfo:", queryInfo);
 
         const [devices, rawTreatments] = await Promise.all([
             userModels.getDevicesByNameSearchOnly({ search: normalized_search, page, limit }),
@@ -1270,21 +1244,15 @@ export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res)
             })
         ]);
 
-        console.log("[TREATMENT API DEBUG] raw devices fetched length:", devices?.length);
-
         const typedPrimaryDevices = enforceDeviceSectionCandidates(devices, queryInfo, {
             minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
         });
-
-        console.log("[TREATMENT API DEBUG] typedPrimaryDevices accepted length:", typedPrimaryDevices?.accepted?.length);
 
         const treatmentsArray = (debugSearch && rawTreatments && typeof rawTreatments === "object" && Array.isArray(rawTreatments.items))
             ? rawTreatments.items
             : rawTreatments;
 
-        console.log("[TREATMENT API DEBUG] treatmentsArray length:", treatmentsArray?.length);
-
-        const relationExpansion = shouldExpandRelatedSearch(queryInfo, normalized_search)
+        const relationExpansion = shouldRunRelationshipExpansion(queryInfo, normalized_search, typedPrimaryDevices.accepted, treatmentsArray)
             ? await userModels.getRelationshipAwareSearchExpansion({
                 search: normalized_search,
                 language,
@@ -1293,8 +1261,6 @@ export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res)
             })
             : { devices: [], treatments: [], doctors: [], clinics: [], debug: {} };
 
-        console.log("[TREATMENT API DEBUG] relationExpansion.treatments length:", relationExpansion?.treatments?.length);
-
         const mergedTreatments = mergeGraphAwareResults(treatmentsArray, relationExpansion.treatments, {
             keySelector: (row) => row?.treatment_id,
             nameSelector: (row) => row?.name || row?.swedish || "",
@@ -1302,8 +1268,6 @@ export const gettreatmentsBySearchOnlyController = asyncHandler(async (req, res)
             primaryPriority: 1,
             relatedDefaultPriority: 2
         });
-
-        console.log("[TREATMENT API DEBUG] mergedTreatments length:", mergedTreatments?.length);
 
         // 5️⃣ Return ranked response
         if (debugSearch && rawTreatments && typeof rawTreatments === "object" && Array.isArray(rawTreatments.items)) {

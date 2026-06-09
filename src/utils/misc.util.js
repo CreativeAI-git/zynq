@@ -448,6 +448,11 @@ export async function deleteGuestData() {
 }
 
 const GOOGLE_TRANSLATE_KEY = process.env.GOOGLE_TRANSLATE_KEY
+const TRANSLATION_CACHE = new Map();
+
+function isMostlyAsciiText(value = "") {
+    return /^[\x00-\x7F]*$/.test(String(value || ""));
+}
 
 // export async function translator(question, targetLang) {
 //     try {
@@ -474,7 +479,6 @@ export const getTopSimilarRows = async (rows, search, threshold = 0.4, topN = nu
 
     const normalized_search = await translator(search, 'en');
 
-    console.log("normalized_search - ", normalized_search)
     // 1️⃣ Get embedding for the search term
     const response = await axios.post("http://localhost:11434/api/embeddings", {
         model: "nomic-embed-text",
@@ -612,13 +616,14 @@ function containsSafeTerm(text) {
 export async function translator(question, targetLang = "en") {
     try {
         if (!question || !question.trim()) return question;
+        if (containsSafeTerm(question) || (targetLang === "en" && isMostlyAsciiText(question))) {
+            return restoreCanonicalBrandTerms(question);
+        }
 
         // 🧩 Step 1: Detect language first
         const detectUrl = `https://translation.googleapis.com/language/translate/v2/detect?key=${GOOGLE_TRANSLATE_KEY}`;
-        const detectResp = await axios.post(detectUrl, { q: question });
+        const detectResp = await axios.post(detectUrl, { q: question }, { timeout: Number(process.env.TRANSLATE_TIMEOUT_MS || 3500) });
         const detectedLang = detectResp.data?.data?.detections?.[0]?.[0]?.language || "en";
-
-        console.log("Detected language:", detectedLang);
 
         //   // ✅ Step 2: Skip translation if English or already known term
         //   if (detectedLang === "en" || shouldSkipTranslation(question)) {
@@ -634,14 +639,15 @@ export async function translator(question, targetLang = "en") {
         //     "protected"), which then leaks into the UI unchanged.
         if (["sv", "da", "no", "de", "fr", "it", "es"].includes(detectedLang)) {
             const translated = await googleTranslator(question, targetLang);
-            console.log(`Translated (${detectedLang} → ${targetLang}): '${question}' → '${translated}'`);
             return translated;
         }
 
         // Otherwise, return unchanged
         return question;
     } catch (err) {
-        console.error("Translate error:", err.response?.data || err.message);
+        if (process.env.SEARCH_DEBUG_LOGS === "true") {
+            console.error("Translate error:", err.response?.data || err.message);
+        }
         return question;
     }
 }
@@ -653,14 +659,25 @@ export async function localizeTextValue(value, language = "en") {
 
     try {
         const target = String(language || "en").toLowerCase();
+        const cacheKey = `${target}:${text}`;
+        if (TRANSLATION_CACHE.has(cacheKey)) return TRANSLATION_CACHE.get(cacheKey);
+        if (containsSafeTerm(text) || (target === "en" && isMostlyAsciiText(text))) {
+            const restored = restoreCanonicalBrandTerms(text);
+            TRANSLATION_CACHE.set(cacheKey, restored);
+            return restored;
+        }
+
         const translated = target === "sv"
             ? await googleTranslator(text, "sv")
             : await googleTranslator(text, "en");
 
-        return restoreCanonicalBrandTerms(translated);
+        const restored = restoreCanonicalBrandTerms(translated);
+        TRANSLATION_CACHE.set(cacheKey, restored);
+        return restored;
     } catch (error) {
-        console.error("localizeTextValue error:=====>", error);
-        console.error("localizeTextValue error:", error?.response?.data || error?.message || error);
+        if (process.env.SEARCH_DEBUG_LOGS === "true") {
+            console.error("localizeTextValue error:", error?.response?.data || error?.message || error);
+        }
         return value;
     }
 }
