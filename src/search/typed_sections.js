@@ -1,4 +1,4 @@
-import { isTextAllowedForIntent, normalizeSearchText, parseSearchIntent } from "./intent_taxonomy.js";
+import { isTextAllowedForIntent, normalizeSearchText, parseSearchIntent, SPECIFIC_LASER_BUCKETS } from "./intent_taxonomy.js";
 import { normalizeProtectedAlias } from "./protected_terms.js";
 import dotenv from "dotenv";
 
@@ -74,6 +74,12 @@ function evaluateTechnologyCompatibility(queryInfo = {}, rowText = "") {
   if (!rowBucket) return true;
 
   if (queryBucket === rowBucket) return true;
+
+  // Generic laser query is compatible with any specific laser technology
+  if (queryBucket === "laser" && SPECIFIC_LASER_BUCKETS.has(rowBucket)) {
+    return true;
+  }
+
   return getBucketRoot(queryBucket) === getBucketRoot(rowBucket);
 }
 
@@ -100,7 +106,7 @@ const IGNORED_ENTITY_TOKENS = new Set([
 function getQueryEntityTokens(queryInfo = {}) {
   const queryTokens = normalizeSearchText(queryInfo?.normalized || queryInfo?.raw || "")
     .split(/\s+/)
-    .filter((token) => token.length >= 4);
+    .filter((token) => token.length >= 3);
   const intentTokens = normalizeSearchText(queryInfo?.matchedKeyword || "")
     .split(/\s+/)
     .filter(Boolean);

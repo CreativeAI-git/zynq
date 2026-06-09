@@ -4,6 +4,10 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+export const SPECIFIC_LASER_BUCKETS = new Set(["ipl", "pico", "alexandrite", "thulium", "co2", "erbium", "ndyag"]);
+export const ALL_LASER_BUCKETS = new Set(["laser", ...SPECIFIC_LASER_BUCKETS]);
+
+
 function parseJsonObjectEnv(rawValue) {
   if (!rawValue) return null;
   try {
@@ -128,8 +132,43 @@ function buildIntentBuckets() {
       },
       laser: {
         strict: true,
-        include: ["laser", "ipl", "pico", "picosecond", "alexandrite", "thulium"],
+        include: ["laser", "laser treatment", "laserbehandling", "laserbehandling", "laser hair removal", "laser pigmentation"],
         exclude: ["non laser", "not laser", "without laser"]
+      },
+      ipl: {
+        strict: true,
+        include: ["ipl"],
+        exclude: []
+      },
+      pico: {
+        strict: true,
+        include: ["pico", "picosecond"],
+        exclude: []
+      },
+      alexandrite: {
+        strict: true,
+        include: ["alexandrite"],
+        exclude: []
+      },
+      thulium: {
+        strict: true,
+        include: ["thulium"],
+        exclude: []
+      },
+      co2: {
+        strict: true,
+        include: ["co2", "co 2", "carbon dioxide"],
+        exclude: []
+      },
+      erbium: {
+        strict: true,
+        include: ["erbium", "er:yag", "eryag"],
+        exclude: []
+      },
+      ndyag: {
+        strict: true,
+        include: ["nd:yag", "ndyag", "n d yag"],
+        exclude: []
       },
       rf: {
         strict: true,
@@ -167,7 +206,7 @@ const BUILTIN_INTENT_BUCKETS = {
   },
   laser: {
     strict: true,
-    include: ["laser", "laser treatment", "laserbehandling", "laser behandling", "laser hair removal", "laser pigmentation", "ipl", "fotona", "morpheus8", "prp", "nd:yag", "n d yag", "ndyag", "lasermd", "clarity ii", "candela nordlys"],
+    include: ["laser", "laser treatment", "laserbehandling", "laserbehandling", "laser hair removal", "laser pigmentation", "fotona", "morpheus8", "prp", "lasermd", "clarity ii", "candela nordlys"],
     exclude: []
   }
 };
@@ -368,7 +407,7 @@ export function parseSearchIntent(rawSearch = "") {
   let matchedKeyword = "";
 
   for (const [bucket, def] of Object.entries(INTENT_BUCKETS)) {
-    if (bucket === "laser" && excludesLaser) continue;
+    if (ALL_LASER_BUCKETS.has(bucket) && excludesLaser) continue;
     const includeHits = (def.include || []).filter((kw) => {
       const normalizedKeyword = normalizeSearchText(kw);
       return includesPhrase(normalized, normalizedKeyword) ||
