@@ -611,14 +611,33 @@ export const rankSimilarRows = async (rows, search, threshold = 0, topN = null) 
 };
 
 
-function containsSafeTerm(text) {
-    return containsProtectedTerm(text);
+function shouldSkipTranslation(text) {
+    const trimmed = (text || "").trim();
+    if (!trimmed) return true;
+
+    const lower = trimmed.toLowerCase();
+
+    // 1. Check if the string is exactly a protected term (case-insensitive)
+    const isExactProtected = PROTECTED_TERMS.some(term => term.toLowerCase() === lower);
+    if (isExactProtected) return true;
+
+    // 2. Check if it's a list/comma-separated set of protected terms (e.g. "Morpheus8, Clarity II")
+    const segments = trimmed.split(/[,;|]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+    if (segments.length > 0) {
+        const allSegmentsProtected = segments.every(seg => {
+            if (/^\d+$/.test(seg)) return true; // numbers are fine to skip
+            return PROTECTED_TERMS.some(term => term.toLowerCase() === seg);
+        });
+        if (allSegmentsProtected) return true;
+    }
+
+    return false;
 }
 
 export async function translator(question, targetLang = "en") {
     try {
         if (!question || !question.trim()) return question;
-        if (containsSafeTerm(question) || (targetLang === "en" && isMostlyAsciiText(question))) {
+        if (shouldSkipTranslation(question) || (targetLang === "en" && isMostlyAsciiText(question))) {
             return restoreCanonicalBrandTerms(question);
         }
 
@@ -627,18 +646,7 @@ export async function translator(question, targetLang = "en") {
         const detectResp = await axios.post(detectUrl, { q: question }, { timeout: 3000 });
         const detectedLang = detectResp.data?.data?.detections?.[0]?.[0]?.language || "en";
 
-        //   // ✅ Step 2: Skip translation if English or already known term
-        //   if (detectedLang === "en" || shouldSkipTranslation(question)) {
-        //     console.log("Skipping translation: English or known brand term");
-        //     return question;
-        //   }
-
         // 🌍 Step 3: Only translate if it’s Swedish or other non-English
-        // ⚠️  DO NOT manually call protectTermsInText/restoreProtectedTerms here.
-        //     googleTranslator() already does that internally.
-        //     Double-protecting causes tokens like __protected_term_0__ to reach
-        //     Google Translate and come back as __skyddad_term_0__ (Swedish for
-        //     "protected"), which then leaks into the UI unchanged.
         if (["sv", "da", "no", "de", "fr", "it", "es"].includes(detectedLang)) {
             const translated = await googleTranslator(question, targetLang);
             return translated;
@@ -662,7 +670,7 @@ export async function localizeTextValue(value, language = "en") {
         const target = String(language || "en").toLowerCase();
         const cacheKey = `${target}:${text}`;
         if (TRANSLATION_CACHE.has(cacheKey)) return TRANSLATION_CACHE.get(cacheKey);
-        if (containsSafeTerm(text) || (target === "en" && isMostlyAsciiText(text))) {
+        if (shouldSkipTranslation(text) || (target === "en" && isMostlyAsciiText(text))) {
             const restored = restoreCanonicalBrandTerms(text);
             TRANSLATION_CACHE.set(cacheKey, restored);
             return restored;
@@ -680,18 +688,6 @@ export async function localizeTextValue(value, language = "en") {
         console.error(`localizeTextValue error [${errMsg}]: "${String(value).slice(0, 50)}"`);
         return value;
     }
-}
-
-// 🧠 Only skip if text *is exactly or mostly* a brand name, not if it just contains one
-function shouldSkipTranslation(text) {
-    const lowerText = text.toLowerCase().trim();
-    return PROTECTED_TERMS.some(term => {
-        const lowerTerm = term.toLowerCase();
-        return (
-            lowerText === lowerTerm || // exact match
-            lowerText.split(/\s+/).includes(lowerTerm) // appears as separate word
-        );
-    });
 }
 
 export const applyLanguageOverwrite = (data, lang = "en") => {
@@ -784,6 +780,19 @@ const findLanguagePairs = (obj) => {
                 const base = key.replace("_en", "");
                 pairs.push({ keyBase: base, enKey: key, svKey });
             }
+        }
+
+        // Pattern 5: base + _swedish suffix (e.g. device_name and device_name_swedish)
+        if (key.endsWith("_swedish")) {
+            const base = key.replace("_swedish", "");
+            if (obj.hasOwnProperty(base)) {
+                pairs.push({ keyBase: base, enKey: base, svKey: key });
+            }
+        }
+
+        // Pattern 6: treatment_name and treatment_swedish
+        if (key === "treatment_swedish" && obj.hasOwnProperty("treatment_name")) {
+            pairs.push({ keyBase: "treatment_name", enKey: "treatment_name", svKey: key });
         }
     });
 
