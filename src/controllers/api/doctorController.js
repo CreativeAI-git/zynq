@@ -123,11 +123,12 @@ async function localizeDeviceSearchResult(device = {}, language = "en") {
 
     return {
         ...device,
+        // Device names are brand terms — preserve canonical casing, do NOT translate
         device_name: resolveProtectedDisplayName(baseDeviceName, baseDeviceName),
         device_swedish: resolveProtectedDisplayName(baseDeviceName, baseDeviceName),
-        treatment_name: restoreCanonicalBrandTerms(treatmentName),
-        treatment_swedish: restoreCanonicalBrandTerms(treatmentSwedish),
-        associated_treatments: (device.associated_treatments || []).map(async (treatment) => {
+        treatment_name: treatmentNameLocalized,
+        treatment_swedish: treatmentSwedishLocalized,
+        associated_treatments: await Promise.all((device.associated_treatments || []).map(async (treatment) => {
             const base = treatment?.name || treatment?.swedish || "";
             const { protectedText: protectedBase, map: baseMap } = protectTermsInText(base);
             const [localizedName, localizedSwedish] = await Promise.all([
@@ -136,10 +137,10 @@ async function localizeDeviceSearchResult(device = {}, language = "en") {
             ]);
             return {
                 ...treatment,
-                name: resolveProtectedDisplayName(base, language === "sv" ? (treatment?.swedish || base) : base),
-                swedish: resolveProtectedDisplayName(base, treatment?.swedish || base)
+                name: resolveProtectedDisplayName(base, localizedName),
+                swedish: resolveProtectedDisplayName(base, localizedSwedish)
             };
-        })
+        }))
     };
 }
 
