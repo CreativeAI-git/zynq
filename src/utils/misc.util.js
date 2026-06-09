@@ -97,12 +97,14 @@ export const getTreatmentIDsByUserID = async (userID) => {
     // STEP 1: SCORE INFO (PRIMARY PRIORITY)
     const parsedScoreInfo = safeJSONParse(scoreInfo);
 
+
     if (parsedScoreInfo && mapping && skinConcernMap) {
 
         const concernIDs = [];
 
         for (const key in mapping) {
             const value = parseFloat(parsedScoreInfo[key]);
+
 
             if (value > SCORE_THRESHOLD) {
                 const concernName = mapping[key];
@@ -448,6 +450,11 @@ export async function deleteGuestData() {
 }
 
 const GOOGLE_TRANSLATE_KEY = process.env.GOOGLE_TRANSLATE_KEY
+const TRANSLATION_CACHE = new Map();
+
+function isMostlyAsciiText(value = "") {
+    return /^[\x00-\x7F]*$/.test(String(value || ""));
+}
 
 // export async function translator(question, targetLang) {
 //     try {
@@ -474,7 +481,6 @@ export const getTopSimilarRows = async (rows, search, threshold = 0.4, topN = nu
 
     const normalized_search = await translator(search, 'en');
 
-    console.log("normalized_search - ", normalized_search)
     // 1️⃣ Get embedding for the search term
     const response = await axios.post("http://localhost:11434/api/embeddings", {
         model: "nomic-embed-text",
@@ -612,13 +618,14 @@ function containsSafeTerm(text) {
 export async function translator(question, targetLang = "en") {
     try {
         if (!question || !question.trim()) return question;
+        if (containsSafeTerm(question) || (targetLang === "en" && isMostlyAsciiText(question))) {
+            return restoreCanonicalBrandTerms(question);
+        }
 
         // 🧩 Step 1: Detect language first
         const detectUrl = `https://translation.googleapis.com/language/translate/v2/detect?key=${GOOGLE_TRANSLATE_KEY}`;
-        const detectResp = await axios.post(detectUrl, { q: question });
+        const detectResp = await axios.post(detectUrl, { q: question }, { timeout: 3000 });
         const detectedLang = detectResp.data?.data?.detections?.[0]?.[0]?.language || "en";
-
-        console.log("Detected language:", detectedLang);
 
         //   // ✅ Step 2: Skip translation if English or already known term
         //   if (detectedLang === "en" || shouldSkipTranslation(question)) {
@@ -634,14 +641,14 @@ export async function translator(question, targetLang = "en") {
         //     "protected"), which then leaks into the UI unchanged.
         if (["sv", "da", "no", "de", "fr", "it", "es"].includes(detectedLang)) {
             const translated = await googleTranslator(question, targetLang);
-            console.log(`Translated (${detectedLang} → ${targetLang}): '${question}' → '${translated}'`);
             return translated;
         }
 
         // Otherwise, return unchanged
         return question;
     } catch (err) {
-        console.error("Translate error:", err.response?.data || err.message);
+        const errMsg = err?.code || err?.message || "unknown";
+        console.error(`Translate error [${errMsg}]: "${String(question).slice(0, 50)}"`);
         return question;
     }
 }
@@ -653,14 +660,24 @@ export async function localizeTextValue(value, language = "en") {
 
     try {
         const target = String(language || "en").toLowerCase();
+        const cacheKey = `${target}:${text}`;
+        if (TRANSLATION_CACHE.has(cacheKey)) return TRANSLATION_CACHE.get(cacheKey);
+        if (containsSafeTerm(text) || (target === "en" && isMostlyAsciiText(text))) {
+            const restored = restoreCanonicalBrandTerms(text);
+            TRANSLATION_CACHE.set(cacheKey, restored);
+            return restored;
+        }
+
         const translated = target === "sv"
             ? await googleTranslator(text, "sv")
             : await googleTranslator(text, "en");
 
-        return restoreCanonicalBrandTerms(translated);
+        const restored = restoreCanonicalBrandTerms(translated);
+        TRANSLATION_CACHE.set(cacheKey, restored);
+        return restored;
     } catch (error) {
-        console.error("localizeTextValue error:=====>", error);
-        console.error("localizeTextValue error:", error?.response?.data || error?.message || error);
+        const errMsg = error?.code || error?.message || "unknown";
+        console.error(`localizeTextValue error [${errMsg}]: "${String(value).slice(0, 50)}"`);
         return value;
     }
 }
@@ -683,50 +700,88 @@ export const applyLanguageOverwrite = (data, lang = "en") => {
         if (Array.isArray(obj)) {
             return obj.map(transform);
         }
-
-        if (obj && typeof obj === "object") {
-            const newObj = { ...obj };
-
-            for (const key in newObj) {
-                const value = newObj[key];
-
-                // Recurse deeper
-                if (typeof value === "object" && value !== null) {
-                    newObj[key] = transform(value);
-                }
+        // recursive function
+        const transform = (obj) => {
+            if (Array.isArray(obj)) {
+                return obj.map(transform);
             }
 
-            // Auto-detect language key pairs inside this object
-            const pairs = findLanguagePairs(newObj);
+            if (obj && typeof obj === "object") {
+                const newObj = { ...obj };
+                if (obj && typeof obj === "object") {
+                    const newObj = { ...obj };
 
-            // Apply overwrite for each pair
-            pairs.forEach(({ keyBase, enKey, svKey }) => {
-                if (lang === "en" && enKey in newObj) {
-                    newObj[keyBase] = newObj[enKey];
-                }
-                if (lang === "sv" && svKey in newObj) {
-                    newObj[keyBase] = newObj[svKey];
-                }
-            });
+                    for (const key in newObj) {
+                        const value = newObj[key];
+                        for (const key in newObj) {
+                            const value = newObj[key];
 
-            // Keep protected brand/device names canonical after language overwrite.
-            for (const key in newObj) {
-                if (typeof newObj[key] === "string") {
-                    newObj[key] = restoreCanonicalBrandTerms(newObj[key]);
+                            // Recurse deeper
+                            if (typeof value === "object" && value !== null) {
+                                newObj[key] = transform(value);
+                            }
+                        }
+                        // Recurse deeper
+                        if (typeof value === "object" && value !== null) {
+                            newObj[key] = transform(value);
+                        }
+                    }
+
+                    // Auto-detect language key pairs inside this object
+                    const pairs = findLanguagePairs(newObj);
+                    // Auto-detect language key pairs inside this object
+                    const pairs = findLanguagePairs(newObj);
+
+                    // Apply overwrite for each pair
+                    pairs.forEach(({ keyBase, enKey, svKey }) => {
+                        if (lang === "en" && enKey in newObj) {
+                            newObj[keyBase] = newObj[enKey];
+                        }
+                        if (lang === "sv" && svKey in newObj) {
+                            newObj[keyBase] = newObj[svKey];
+                        }
+                    });
+                    // Apply overwrite for each pair
+                    pairs.forEach(({ keyBase, enKey, svKey }) => {
+                        if (lang === "en" && enKey in newObj) {
+                            newObj[keyBase] = newObj[enKey];
+                        }
+                        if (lang === "sv" && svKey in newObj) {
+                            newObj[keyBase] = newObj[svKey];
+                        }
+                    });
+
+                    // Keep protected brand/device names canonical after language overwrite.
+                    for (const key in newObj) {
+                        if (typeof newObj[key] === "string") {
+                            newObj[key] = restoreCanonicalBrandTerms(newObj[key]);
+                        }
+                    }
+                    // Keep protected brand/device names canonical after language overwrite.
+                    for (const key in newObj) {
+                        if (typeof newObj[key] === "string") {
+                            newObj[key] = restoreCanonicalBrandTerms(newObj[key]);
+                        }
+                    }
+
+                    return newObj;
                 }
+                return newObj;
             }
 
-            return newObj;
-        }
-
+            return obj;
+        };
         return obj;
     };
 
+    return transform(data);
     return transform(data);
 };
 
 // Detect matching language pairs automatically
 const findLanguagePairs = (obj) => {
+    const keys = Object.keys(obj);
+    const pairs = [];
     const keys = Object.keys(obj);
     const pairs = [];
 
@@ -739,27 +794,63 @@ const findLanguagePairs = (obj) => {
                 pairs.push({ keyBase: base, enKey: key, svKey });
             }
         }
+        keys.forEach((key) => {
+            // Pattern 1: base + _en / _sv
+            if (key.endsWith("_en")) {
+                const base = key.replace("_en", "");
+                const svKey = base + "_sv";
+                if (obj.hasOwnProperty(svKey)) {
+                    pairs.push({ keyBase: base, enKey: key, svKey });
+                }
+            }
 
-        // Pattern 2: english / swedish
-        if (key.toLowerCase() === "english") {
-            if (obj.hasOwnProperty("swedish")) {
+            // Pattern 2: english / swedish
+            if (key.toLowerCase() === "english") {
+                if (obj.hasOwnProperty("swedish")) {
+                    pairs.push({
+                        keyBase: "name", // output field name
+                        enKey: key,
+                        svKey: "swedish",
+                    });
+                }
+            }
+            // Pattern 2: english / swedish
+            if (key.toLowerCase() === "english") {
+                if (obj.hasOwnProperty("swedish")) {
+                    pairs.push({
+                        keyBase: "name", // output field name
+                        enKey: key,
+                        svKey: "swedish",
+                    });
+                }
+            }
+
+            // Pattern 3: name + swedish
+            if (key === "name" && obj.hasOwnProperty("swedish")) {
                 pairs.push({
-                    keyBase: "name", // output field name
-                    enKey: key,
+                    keyBase: "name",
+                    enKey: "name",
                     svKey: "swedish",
                 });
             }
-        }
+            // Pattern 3: name + swedish
+            if (key === "name" && obj.hasOwnProperty("swedish")) {
+                pairs.push({
+                    keyBase: "name",
+                    enKey: "name",
+                    svKey: "swedish",
+                });
+            }
 
-        // Pattern 3: name + swedish
-        if (key === "name" && obj.hasOwnProperty("swedish")) {
-            pairs.push({
-                keyBase: "name",
-                enKey: "name",
-                svKey: "swedish",
-            });
-        }
-
+            // Pattern 4: description_en / desc_sv
+            if (key.endsWith("_en")) {
+                const svKey = key.replace("_en", "_sv");
+                if (obj.hasOwnProperty(svKey)) {
+                    const base = key.replace("_en", "");
+                    pairs.push({ keyBase: base, enKey: key, svKey });
+                }
+            }
+        });
         // Pattern 4: description_en / desc_sv
         if (key.endsWith("_en")) {
             const svKey = key.replace("_en", "_sv");
@@ -770,6 +861,7 @@ const findLanguagePairs = (obj) => {
         }
     });
 
+    return pairs;
     return pairs;
 };
 

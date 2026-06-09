@@ -286,8 +286,15 @@ function escapeRegex(value = "") {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const NORMALIZE_TEXT_CACHE = new Map();
+
 export function normalizeSearchText(value = "") {
-  const { protectedText, map } = protectTermsInText(String(value || ""));
+  const cacheKey = String(value || "");
+  if (NORMALIZE_TEXT_CACHE.has(cacheKey)) {
+    return NORMALIZE_TEXT_CACHE.get(cacheKey);
+  }
+
+  const { protectedText, map } = protectTermsInText(cacheKey);
   let out = protectedText
     .toLowerCase()
     .normalize("NFD")
@@ -302,7 +309,10 @@ export function normalizeSearchText(value = "") {
   }
 
   out = out.replace(/\s+/g, " ").trim();
-  return restoreProtectedTerms(out, map).toLowerCase();
+  const result = restoreProtectedTerms(out, map).toLowerCase();
+  
+  NORMALIZE_TEXT_CACHE.set(cacheKey, result);
+  return result;
 }
 
 function includesPhrase(haystack = "", phrase = "") {
@@ -326,7 +336,14 @@ function hasTokenCompatibleMatch(haystack = "", phrase = "") {
   });
 }
 
+const INTENT_CACHE = new Map();
+
 export function parseSearchIntent(rawSearch = "") {
+  const cacheKey = String(rawSearch || "").trim().toLowerCase();
+  if (INTENT_CACHE.has(cacheKey)) {
+    return INTENT_CACHE.get(cacheKey);
+  }
+
   const normalized = normalizeSearchText(rawSearch);
   const negationTargets = buildNegationTargets(normalized);
   const matchedNegationRules = NEGATION_RULES.filter((rule) => rule.pattern.test(normalized));
@@ -372,7 +389,7 @@ export function parseSearchIntent(rawSearch = "") {
     ? (INTENT_BUCKETS[intentBucket]?.strict ? "strict_category" : "broad_concern")
     : "general";
 
-  return {
+  const result = {
     raw: rawSearch,
     normalized,
     language,
@@ -386,6 +403,9 @@ export function parseSearchIntent(rawSearch = "") {
     negationTargets,
     negationSearchHint
   };
+
+  INTENT_CACHE.set(cacheKey, result);
+  return result;
 }
 
 export function isTextAllowedForIntent(text = "", queryInfo = {}) {

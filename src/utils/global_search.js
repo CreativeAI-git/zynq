@@ -18,6 +18,29 @@ dotenv.config();
 const OPENAI_SEARCH_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
 const client = OPENAI_SEARCH_KEY ? new OpenAI({ apiKey: OPENAI_SEARCH_KEY }) : null;
 
+// ── GPT similarity result cache (search+rowCount → scored results) ──
+const GPT_RESULT_CACHE = new Map();
+const GPT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const GPT_CACHE_MAX = 200;
+
+export function getCachedGPTResult(key) {
+  const entry = GPT_RESULT_CACHE.get(key);
+  if (!entry) return undefined;
+  if (Date.now() - entry.ts > GPT_CACHE_TTL) {
+    GPT_RESULT_CACHE.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+
+export function setCachedGPTResult(key, value) {
+  if (GPT_RESULT_CACHE.size >= GPT_CACHE_MAX) {
+    const oldest = GPT_RESULT_CACHE.keys().next().value;
+    GPT_RESULT_CACHE.delete(oldest);
+  }
+  GPT_RESULT_CACHE.set(key, { value, ts: Date.now() });
+}
+
 async function createSearchChatCompletion(payload, context = "search_similarity") {
   if (!client) {
     console.warn(`[${context}] OpenAI key missing. Falling back to lexical ranking.`);
@@ -25,9 +48,19 @@ async function createSearchChatCompletion(payload, context = "search_similarity"
   }
 
   try {
-    return await client.chat.completions.create(payload);
+    // 15-second timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const result = await client.chat.completions.create(payload, {
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+    return result;
   } catch (error) {
-    console.error(`[${context}] OpenAI similarity failed:`, error?.message || error);
+    const errMsg = error?.code || error?.name || error?.message || "unknown";
+    console.error(`[${context}] OpenAI failed [${errMsg}]`);
     return null;
   }
 }
@@ -1563,11 +1596,16 @@ function parseSimilarityResponse(raw, context = "similarity") {
 }
 
 async function batchGPTSimilarity(rows, searchQuery) {
+  if (!rows || rows.length === 0) return [];
+  if (!searchQuery?.trim()) return [];
 
-  // const list = rows.map(r => ({
-  //   id: r.treatment_id,
-  //   text: `${safeString(r.name)} - ${safeString(r.concern_en)} ${safeString(r.description_en)} ${safeString(r.like_wise_terms)}`.trim() 
-  // }));
+  // ── Cache check ──
+  const cacheKey = `gpt:treatment:${searchQuery.trim().toLowerCase()}:${rows.length}`;
+  const cached = getCachedGPTResult(cacheKey);
+  if (cached) {
+    console.log(`[batchGPTSimilarity] Cache hit for "${searchQuery}" (${rows.length} rows)`);
+    return cached;
+  }
 
   const list = rows.map(r => ({
     id: r.treatment_id,
@@ -1580,65 +1618,7 @@ Related Terms: ${safeString(r.like_wise_terms) || ''}
   `.trim()
   }));
 
-
-//   const prompt = `
-// You are a STRICT treatment similarity engine.
-
-// Your task:
-// Compare the Search Query with the ITEM LIST
-// and score ONLY by direct treatment relevance.
-
-// Search Query: "${searchQuery}"
-
-// Return ONLY this exact JSON:
-// {
-//   "results": [
-//     { "id": string, "score": number }
-//   ]
-// }
-
-// IMPORTANT RULES ABOUT IDs:
-// • You MUST ONLY return IDs from the ITEM LIST.
-// • Never invent or modify an ID.
-// • IDs are strings (UUIDs), NOT numbers.
-// • If unsure, return lower score, not a fake ID.
-
-// STRICT MATCHING RULES:
-// • Exact treatment category match = high score
-// • Different treatment categories = low score
-// • Do NOT match only because both are cosmetic/aesthetic treatments
-// • Botox, fillers, laser, RF, microneedling, peeling are DIFFERENT categories
-// • If query is "laser", then botox/fillers should score below 0.30
-// • If query is "botox", laser treatments should score below 0.30
-
-// SCORING:
-// • 0.90 – 1.00 = nearly exact match
-// • 0.75 – 0.89 = strong related treatment
-// • 0.40 – 0.60 = partial similarity only
-// • Below 0.40 = weak match
-
-// NEGATION RULE:
-// If query contains:
-//   - "non laser"
-//   - "not laser"
-//   - "without laser"
-// Then:
-//   a) Exclude laser-related treatments
-//   b) Match alternative non-laser treatments
-
-// VERY IMPORTANT:
-// • Never give medium/high score to unrelated treatment technologies
-// • Treatment technology matters more than cosmetic purpose
-// • Prefer precision over broad semantic similarity
-
-// ITEM LIST:
-// ${JSON.stringify(list)}
-
-// ALLOWED IDs:
-// ${JSON.stringify(rows.map(r => r.treatment_id))}
-// `;
-
-const prompt = `
+  const prompt = `
 You are a strict similarity scoring engine.
 Your task is to compare each item in the ITEM LIST against the Search Query and assign an accurate similarity score based on intent, keywords, and semantic meaning.
 Search Query: "${searchQuery}"
@@ -1720,9 +1700,14 @@ ${JSON.stringify(rows.map(r => r.treatment_id))}
   if (!res) return [];
 
   const raw = res.choices[0].message.content;
+  const parsed = parseSimilarityResponse(raw, "batchGPTSimilarity");
 
+  // ── Cache store ──
+  if (parsed.length > 0) {
+    setCachedGPTResult(cacheKey, parsed);
+  }
 
-  return parseSimilarityResponse(raw, "batchGPTSimilarity");
+  return parsed;
 }
 
 async function runSubTreatmentSimilarityBatch(batch, searchQuery) {
@@ -1795,12 +1780,21 @@ ${JSON.stringify(batch.map(r => r.sub_treatment_id))}
 }
 
 export async function batchGPTSimilaritySubTreatments(rows, searchQuery, batchSize = 100) {
+  if (!rows || rows.length === 0) return [];
+  if (!searchQuery?.trim()) return [];
+
+  // ── Cache check ──
+  const cacheKey = `gpt:subtreatment:${searchQuery.trim().toLowerCase()}:${rows.length}`;
+  const cached = getCachedGPTResult(cacheKey);
+  if (cached) {
+    console.log(`[batchGPTSimilaritySubTreatments] Cache hit for "${searchQuery}" (${rows.length} rows)`);
+    return cached;
+  }
+
   const batches = [];
   for (let i = 0; i < rows.length; i += batchSize) {
     batches.push(rows.slice(i, i + batchSize));
   }
-
-  // console.log(`Processing ${batches.length} batches in parallel...`);
 
   // Run all batches in parallel
   const batchPromises = batches.map(batch =>
@@ -1808,22 +1802,33 @@ export async function batchGPTSimilaritySubTreatments(rows, searchQuery, batchSi
   );
 
   const results = await Promise.all(batchPromises);
+  const flat = results.flat();
 
-  // Optional debugging
-  results.forEach((partial, idx) => {
-  });
+  // ── Cache store ──
+  if (flat.length > 0) {
+    setCachedGPTResult(cacheKey, flat);
+  }
 
-  return results.flat();
+  return flat;
 }
 
 
 export async function batchDeviceGPTSimilarity(rows, searchQuery, batchSize = 100) {
+  if (!rows || rows.length === 0) return [];
+  if (!searchQuery?.trim()) return [];
+
+  // ── Cache check ──
+  const cacheKey = `gpt:device:${searchQuery.trim().toLowerCase()}:${rows.length}`;
+  const cached = getCachedGPTResult(cacheKey);
+  if (cached) {
+    console.log(`[batchDeviceGPTSimilarity] Cache hit for "${searchQuery}" (${rows.length} rows)`);
+    return cached;
+  }
+
   const batches = [];
   for (let i = 0; i < rows.length; i += batchSize) {
     batches.push(rows.slice(i, i + batchSize));
   }
-
-  // console.log(`Processing ${batches.length} batches in parallel...`);
 
   // Process all batches in parallel
   const batchPromises = batches.map(batch =>
@@ -1831,13 +1836,14 @@ export async function batchDeviceGPTSimilarity(rows, searchQuery, batchSize = 10
   );
 
   const results = await Promise.all(batchPromises);
+  const flat = results.flat();
 
-  // Log each partial result
-  results.forEach(partial => {
-    // console.log("partial device", partial);
-  });
+  // ── Cache store ──
+  if (flat.length > 0) {
+    setCachedGPTResult(cacheKey, flat);
+  }
 
-  return results.flat();
+  return flat;
 }
 
 
@@ -1985,6 +1991,14 @@ export async function runGPTSimilarity(rows, searchQuery, options = {}) {
   if (!rows || rows.length === 0) return [];
   if (!searchQuery?.trim()) return [];
 
+  // ── Cache check: same query + same row count = same results ──
+  const cacheKey = `gpt:${idField}:${searchQuery.trim().toLowerCase()}:${rows.length}`;
+  const cached = getCachedGPTResult(cacheKey);
+  if (cached) {
+    console.log(`[runGPTSimilarity] Cache hit for "${searchQuery}" (${rows.length} rows)`);
+    return cached;
+  }
+
   // Split into batches
   const batches = [];
   for (let i = 0; i < rows.length; i += batchSize) {
@@ -1998,14 +2012,21 @@ export async function runGPTSimilarity(rows, searchQuery, options = {}) {
     batches.map(batch =>
       runSingleBatch(batch, searchQuery, idField, textFields)
         .catch(err => {
-          console.error("Batch failed:", err);
+          console.error("Batch failed:", err?.message || err);
           return []; // return empty so other batches still succeed
         })
     )
   );
 
   // Flatten result arrays
-  return results.flat();
+  const flat = results.flat();
+
+  // ── Cache store ──
+  if (flat.length > 0) {
+    setCachedGPTResult(cacheKey, flat);
+  }
+
+  return flat;
 }
 
 

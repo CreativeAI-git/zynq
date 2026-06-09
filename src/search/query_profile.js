@@ -8,7 +8,14 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+const QUERY_PROFILE_CACHE = new Map();
+
 export function buildQueryProfile(search = "", corpusTexts = []) {
+  const cacheKey = `${String(search).trim().toLowerCase()}::${corpusTexts.length}`;
+  if (QUERY_PROFILE_CACHE.has(cacheKey)) {
+    return QUERY_PROFILE_CACHE.get(cacheKey);
+  }
+
   const normalized = normalizeSearchText(search || "");
   const tokens = tokenize(normalized);
   const uniqueTokens = Array.from(new Set(tokens));
@@ -49,7 +56,7 @@ export function buildQueryProfile(search = "", corpusTexts = []) {
     1
   );
 
-  return {
+  const profile = {
     raw: String(search || ""),
     normalized,
     tokens: uniqueTokens,
@@ -61,6 +68,9 @@ export function buildQueryProfile(search = "", corpusTexts = []) {
     broad_intent: specificity < 0.4,
     narrow_intent: specificity >= 0.65,
   };
+
+  QUERY_PROFILE_CACHE.set(cacheKey, profile);
+  return profile;
 }
 
 export function computeAdaptiveThreshold(profile = {}, options = {}) {

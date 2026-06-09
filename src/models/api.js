@@ -38,7 +38,7 @@ export const create_user = async (mobile_number, otp = '', language) => {
             language,
             is_verified: 0,
             is_active: 1,
-            approval_status : "APPROVED"
+            approval_status: "APPROVED"
         };
         return await db.query(`INSERT INTO tbl_users SET ?`, userData);
     } catch (error) {
@@ -1875,7 +1875,7 @@ export const getTreatmentsByConcernIds = async (concern_ids = [], lang) => {
 
 //             WHERE t.is_deleted = 0
 //               AND t.approval_status = 'APPROVED'
-              
+
 //         `;
 
 //         let results = await db.query(query, concern_ids);
@@ -3288,7 +3288,6 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
     try {
         if (!search?.trim()) return [];
         const queryInfo = parseSearchIntent(search);
-        console.log("queryInfo", queryInfo);
         const negationTargets = Array.isArray(queryInfo?.negationTargets)
             ? Array.from(new Set(queryInfo.negationTargets.map((value) => String(value || "").trim()).filter(Boolean)))
             : [];
@@ -3373,8 +3372,6 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
           AND d.is_deleted = 0
       `);
 
-        console.log("raw DB rows", results.length);
-
         if (pureNegationQuery) {
             results = results.filter((row) => !isNegatedDeviceRow(row));
 
@@ -3423,7 +3420,6 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
             phase: "candidate_generation",
             minRelationshipStrength: 0
         });
-        console.log("typedPre.accepted", typedPre.accepted.length);
         results = typedPre.accepted;
 
         // 3️⃣ Semantic/lexical ranking only on typed-safe candidates
@@ -3438,7 +3434,6 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
             phase: "section_assignment",
             minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
         });
-        console.log("typedFinal.accepted", typedFinal.accepted.length);
         results = typedFinal.accepted;
 
         // Broad device queries should still surface the approved device catalog even
