@@ -479,7 +479,7 @@ function isMostlyAsciiText(value = "") {
 export const getTopSimilarRows = async (rows, search, threshold = 0.4, topN = null) => {
     if (!search?.trim()) return rows;
 
-    const normalized_search = await translator(search, 'en');
+    const normalized_search = await translator(search, 'en', true);
 
     // 1️⃣ Get embedding for the search term
     const response = await axios.post("http://localhost:11434/api/embeddings", {
@@ -634,11 +634,18 @@ function shouldSkipTranslation(text) {
     return false;
 }
 
-export async function translator(question, targetLang = "en") {
+export async function translator(question, targetLang = "en", forceTranslate = false) {
     try {
         if (!question || !question.trim()) return question;
-        if (shouldSkipTranslation(question) || (targetLang === "en" && isMostlyAsciiText(question))) {
-            return restoreCanonicalBrandTerms(question);
+        const trimmedLower = question.trim().toLowerCase();
+        const cacheKey = `tr:${targetLang}:${forceTranslate}:${trimmedLower}`;
+        if (TRANSLATION_CACHE.has(cacheKey)) return TRANSLATION_CACHE.get(cacheKey);
+
+        const isShortQuery = question.trim().split(/\s+/).length <= 5;
+        if (shouldSkipTranslation(question) || (targetLang === "en" && isMostlyAsciiText(question) && !isShortQuery && !forceTranslate)) {
+            const restored = restoreCanonicalBrandTerms(question);
+            TRANSLATION_CACHE.set(cacheKey, restored);
+            return restored;
         }
 
         // 🧩 Step 1: Detect language first
@@ -649,10 +656,12 @@ export async function translator(question, targetLang = "en") {
         // 🌍 Step 3: Only translate if it’s Swedish or other non-English
         if (["sv", "da", "no", "de", "fr", "it", "es"].includes(detectedLang)) {
             const translated = await googleTranslator(question, targetLang);
+            TRANSLATION_CACHE.set(cacheKey, translated);
             return translated;
         }
 
         // Otherwise, return unchanged
+        TRANSLATION_CACHE.set(cacheKey, question);
         return question;
     } catch (err) {
         const errMsg = err?.code || err?.message || "unknown";

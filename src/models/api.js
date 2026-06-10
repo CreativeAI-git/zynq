@@ -2362,7 +2362,7 @@ WHERE t.is_deleted = 0
                 normalized_search = filters.search
             } else {
                 console.log("Long query, translating to english");
-                normalized_search = await translator(filters.search, 'en');
+                normalized_search = await translator(filters.search, 'en', true);
             }
             // 2️⃣ Compute top similar rows using embedding
             results = await getTreatmentsAIResult(results, normalized_search, 0.4, null, lang);
@@ -3341,36 +3341,42 @@ export const getDevicesByNameSearchOnly = async ({ search = '', page = null, lim
         // 1️⃣ Fetch the full approved device catalog and enrich it with linked treatments.
         // This keeps laser searches grounded in the actual device master list instead of
         // only the smaller treatment-mapping subset.
-        let results = await db.query(`
-        SELECT 
-          d.*,
-          d.name AS device_name,
-          d.swedish AS device_swedish,
-          td.treatment_id,
-          td.treatment_ids,
-          td.treatment_name,
-          td.treatment_swedish,
-          td.classification_type
-        FROM tbl_devices d
-        LEFT JOIN (
-          SELECT
-            td.device_id,
-            MIN(td.treatment_id) AS treatment_id,
-            GROUP_CONCAT(DISTINCT td.treatment_id ORDER BY td.treatment_id SEPARATOR ',') AS treatment_ids,
-            GROUP_CONCAT(DISTINCT t.name ORDER BY t.name SEPARATOR ',') AS treatment_name,
-            GROUP_CONCAT(DISTINCT t.swedish ORDER BY t.name SEPARATOR ',') AS treatment_swedish,
-            GROUP_CONCAT(DISTINCT t.classification_type ORDER BY t.classification_type SEPARATOR ',') AS classification_type
-          FROM tbl_treatment_devices td
-          LEFT JOIN tbl_treatments t
-            ON t.treatment_id = td.treatment_id
-            AND t.approval_status = 'APPROVED'
-            AND t.is_deleted = 0
-          GROUP BY td.device_id
-        ) td
-          ON td.device_id = d.device_id
-        WHERE d.approval_status = 'APPROVED'
-          AND d.is_deleted = 0
-      `);
+        let results;
+        if (global.DEVICES_BASE_CACHE) {
+            results = JSON.parse(JSON.stringify(global.DEVICES_BASE_CACHE));
+        } else {
+            results = await db.query(`
+            SELECT 
+              d.*,
+              d.name AS device_name,
+              d.swedish AS device_swedish,
+              td.treatment_id,
+              td.treatment_ids,
+              td.treatment_name,
+              td.treatment_swedish,
+              td.classification_type
+            FROM tbl_devices d
+            LEFT JOIN (
+              SELECT
+                td.device_id,
+                MIN(td.treatment_id) AS treatment_id,
+                GROUP_CONCAT(DISTINCT td.treatment_id ORDER BY td.treatment_id SEPARATOR ',') AS treatment_ids,
+                GROUP_CONCAT(DISTINCT t.name ORDER BY t.name SEPARATOR ',') AS treatment_name,
+                GROUP_CONCAT(DISTINCT t.swedish ORDER BY t.name SEPARATOR ',') AS treatment_swedish,
+                GROUP_CONCAT(DISTINCT t.classification_type ORDER BY t.classification_type SEPARATOR ',') AS classification_type
+              FROM tbl_treatment_devices td
+              LEFT JOIN tbl_treatments t
+                ON t.treatment_id = td.treatment_id
+                AND t.approval_status = 'APPROVED'
+                AND t.is_deleted = 0
+              GROUP BY td.device_id
+            ) td
+              ON td.device_id = d.device_id
+            WHERE d.approval_status = 'APPROVED'
+              AND d.is_deleted = 0
+            `);
+            global.DEVICES_BASE_CACHE = JSON.parse(JSON.stringify(results));
+        }
 
         if (pureNegationQuery) {
             results = results.filter((row) => !isNegatedDeviceRow(row));
@@ -3486,7 +3492,7 @@ export const getRelationshipAwareSearchExpansion = async ({
 }) => {
     try {
         const queryInfo = parseSearchIntent(search || "");
-        const normalized = normalizeSearchText(search || "").toLowerCase();
+        const normalized = normalizeSearchText(search || "", { skipRewrite: true }).toLowerCase();
         if (!normalized) return { devices: [], treatments: [] };
 
         const collectDelimitedIds = (value) => {
@@ -4068,7 +4074,11 @@ export const getTreatmentsBySearchOnly = async ({
         };
 
         // 1️⃣ Fetch all treatments that have embeddings
-        let results = await db.query(`
+        let results;
+        if (global.TREATMENTS_BASE_CACHE) {
+            results = JSON.parse(JSON.stringify(global.TREATMENTS_BASE_CACHE));
+        } else {
+            results = await db.query(`
       SELECT t.treatment_id,
       t.name,t.swedish,
       t.classification_type,
@@ -4157,6 +4167,8 @@ export const getTreatmentsBySearchOnly = async ({
       GROUP BY t.treatment_id
       ORDER BY t.treatment_id
     `);
+            global.TREATMENTS_BASE_CACHE = JSON.parse(JSON.stringify(results));
+        }
 
         if (pureNegationQuery || negationTargets.length > 0) {
             results = results.filter((row) => !isNegatedTreatmentRow(row));
@@ -4296,24 +4308,30 @@ export const getSubTreatmentsBySearchOnly = async ({
         if (!search?.trim()) return [];
 
         // 1️⃣ Fetch all treatments that have embeddings
-        let results = await db.query(`
-            SELECT
-                stm.sub_treatment_id,
-                tstm.treatment_id,
-                stm.name,
-                stm.swedish,
-                t.name AS treatment_name,
-                t.swedish AS treatment_swedish
-            FROM tbl_sub_treatment_master stm
-            LEFT JOIN tbl_treatment_sub_treatments tstm 
-                ON stm.sub_treatment_id = tstm.sub_treatment_id
-            LEFT JOIN tbl_treatments t
-                ON tstm.treatment_id = t.treatment_id
-            WHERE stm.is_deleted = 0
-            AND stm.approval_status = 'APPROVED'
-            AND t.approval_status = 'APPROVED'
-            AND t.is_deleted = 0
-        `);
+        let results;
+        if (global.SUBTREATMENTS_BASE_CACHE) {
+            results = JSON.parse(JSON.stringify(global.SUBTREATMENTS_BASE_CACHE));
+        } else {
+            results = await db.query(`
+                SELECT
+                    stm.sub_treatment_id,
+                    tstm.treatment_id,
+                    stm.name,
+                    stm.swedish,
+                    t.name AS treatment_name,
+                    t.swedish AS treatment_swedish
+                FROM tbl_sub_treatment_master stm
+                LEFT JOIN tbl_treatment_sub_treatments tstm 
+                    ON stm.sub_treatment_id = tstm.sub_treatment_id
+                LEFT JOIN tbl_treatments t
+                    ON tstm.treatment_id = t.treatment_id
+                WHERE stm.is_deleted = 0
+                AND stm.approval_status = 'APPROVED'
+                AND t.approval_status = 'APPROVED'
+                AND t.is_deleted = 0
+            `);
+            global.SUBTREATMENTS_BASE_CACHE = JSON.parse(JSON.stringify(results));
+        }
 
         // 2️⃣ Compute top similar rows using embedding
         results = await getSubTreatmentsAIResult(results, search, 0.4, null, language, actualSearch);

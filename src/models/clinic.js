@@ -2281,7 +2281,7 @@ export const getDoctorTreatmentsBulkV3 = async (doctorId, clinic_id, lang = 'en'
                 normalized_search = search
             } else {
                 console.log("Long query, translating to english");
-                normalized_search = await translator(search, 'en');
+                normalized_search = await translator(search, 'en', true);
             }
             results = await getTreatmentsAIResult(results, normalized_search, 0.4, null, lang);
 
