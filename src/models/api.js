@@ -4020,11 +4020,11 @@ export const getTreatmentsBySearchOnly = async ({
 }) => {
     try {
         if (!search?.trim()) return [];
-        const queryInfo = parseSearchIntent(actualSearch || search);
+        const queryInfo = parseSearchIntent(search);
         const negationTargets = Array.isArray(queryInfo?.negationTargets)
             ? Array.from(new Set(queryInfo.negationTargets.map((value) => String(value || "").trim()).filter(Boolean)))
             : [];
-        const normalizedSearch = normalizeSearchText(actualSearch || search);
+        const normalizedSearch = normalizeSearchText(search);
         const negationOnlyText = normalizedSearch
             .replace(/\b(?:non|not|without|exclude|avoid|no|anti)\b[\s-]*/gi, " ")
             .replace(/\b(?:laser|ipl|pico|picosecond|alexandrite|thulium|fotona|clarity|candela|lasermd|lase md|nd:yag|nd yag|n d yag|rf|radiofrequency|radio frequency|radiofrekvens|hifu|ultrasound|ultraljud|microneedling|skinpen|dermapen|morpheus|morpheus8|morpheus 8|filler|hair removal|hårborttagning)\b/gi, " ")
@@ -4179,7 +4179,7 @@ export const getTreatmentsBySearchOnly = async ({
         }
 
         const queryProfile = buildQueryProfile(
-            actualSearch || search,
+            search,
             results.map((row) => [
                 row.name,
                 row.swedish,

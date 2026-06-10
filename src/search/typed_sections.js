@@ -201,7 +201,7 @@ export function enforceDeviceSectionCandidates(rows = [], queryInfo = {}, option
     const strictCategoryIntent = queryInfo?.intentType === "strict_category";
     const passesStrictDeviceRule = isCandidateGeneration
       ? (typedFilterPassed && ((intentCompatible && technologyCompatible) || entityTokenMatch))
-      : (typedFilterPassed && (exactOrAlias || entityTokenMatch || explicitlyMapped || (passesRelationship && !strictCategoryIntent)));
+      : (typedFilterPassed && (exactOrAlias || entityTokenMatch || explicitlyMapped || (passesRelationship && (!strictCategoryIntent || technologyCompatible))));
 
     let rejectionReason = null;
     if (!typedFilterPassed) rejectionReason = "entity_type_not_allowed_for_devices";
