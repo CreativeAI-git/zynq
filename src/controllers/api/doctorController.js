@@ -15,7 +15,7 @@ import OpenAI from "openai";
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 import { translator } from "../../utils/misc.util.js";
 import { mergeGraphAwareResults } from "../../utils/search_graph.util.js";
-import { parseSearchIntent } from "../../search/intent_taxonomy.js";
+import { parseSearchIntent, normalizeSearchText, INTENT_BUCKETS } from "../../search/intent_taxonomy.js";
 import { enforceDeviceSectionCandidates } from "../../search/typed_sections.js";
 import { containsProtectedTerm, protectTermsInText, restoreProtectedTerms, resolveProtectedDisplayName, restoreCanonicalBrandTerms } from "../../search/protected_terms.js";
 
@@ -156,13 +156,30 @@ function getSearchRequestContext(req = {}) {
     };
 }
 
+const CANONICAL_INTENT_TERMS = Object.fromEntries(
+    Object.entries(INTENT_BUCKETS || {}).map(([bucket, def]) => {
+        const canonical = (def.include || []).find(kw => !/[åäöÅÄÖ]/i.test(kw));
+        return [bucket, canonical || def.include?.[0] || bucket];
+    }).filter(([_, term]) => Boolean(term))
+);
+
 async function normalizeSearchQuery(search = "", language = "en", translateLongQuery = true) {
     const trimmed = String(search || "").trim();
     if (trimmed.length <= 3) return trimmed;
+
+    // Direct mapping for known concern/category queries
+    const rawIntent = parseSearchIntent(trimmed);
+    if (rawIntent?.canonicalIntent && CANONICAL_INTENT_TERMS[rawIntent.canonicalIntent]) {
+        const intentWord = rawIntent.matchedKeyword;
+        if (normalizeSearchText(trimmed) === normalizeSearchText(intentWord)) {
+            return CANONICAL_INTENT_TERMS[rawIntent.canonicalIntent];
+        }
+    }
+
     const likelyNonEnglish =
         language !== "en" ||
         /[åäöÅÄÖ]/.test(trimmed) ||
-        /\b(mörka|morka|under ögon|laserbehandling|behandling|ringar|finnar|hårborttagning)\b/i.test(trimmed);
+        /\b(mörka|morka|under ögon|laserbehandling|behandling|ringar|finnar|hårborttagning|huduppstramning|huduppstramande|hudtätning|hudatstramning|hudåtstramning|slapphet|fasthet|pigmentering|rodnad|rodhet|blodkarl|blodkärl|aknearr|akneärr|rynkor|rynka|linjer|kraksparkar|kråksparkar)\b/i.test(trimmed);
     const shouldTranslate = translateLongQuery && likelyNonEnglish;
     if (!shouldTranslate) return trimmed;
 

@@ -130,6 +130,11 @@ function buildIntentBuckets() {
         include: ["pores", "porer", "large pores", "enlarged pores"],
         exclude: []
       },
+      wrinkles: {
+        strict: false,
+        include: ["wrinkles", "wrinkle", "rynkor", "rynka", "fine lines", "fina linjer", "lines", "linjer", "kraksparkar", "kråksparkar", "bunny lines", "marionettlinjer", "marionette lines", "nasolabial", "nasolabiala", "panna"],
+        exclude: []
+      },
       laser: {
         strict: true,
         include: ["laser", "laser treatment", "laserbehandling", "laserbehandling", "laser hair removal", "laser pigmentation"],
@@ -453,6 +458,7 @@ export function isTextAllowedForIntent(text = "", queryInfo = {}) {
 
   const def = INTENT_BUCKETS[intent];
   if (!def) return true;
+  if (!def.strict) return true;
 
   const normalized = normalizeSearchText(text);
   const hasInclude = (def.include || []).some((kw) => {
