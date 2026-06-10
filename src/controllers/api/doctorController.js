@@ -1307,7 +1307,7 @@ export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res
         });
 
         const mergedDevices = mergeGraphAwareResults(typedPrimaryDevices.accepted, typedRelationDevices.accepted || [], {
-            keySelector: (row) => row?.id || `${row?.device_id || ""}:${row?.treatment_id || ""}`,
+            keySelector: (row) => row?.device_id,
             nameSelector: (row) => row?.device_name || "",
             scoreSelector: (row) => row?.final_score ?? row?.score ?? 0,
             primaryPriority: 1,
