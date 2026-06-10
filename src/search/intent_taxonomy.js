@@ -369,7 +369,7 @@ function hasTokenCompatibleMatch(haystack = "", phrase = "") {
     return haystackTokens.some((textToken) => (
       textToken === phraseToken ||
       textToken.startsWith(phraseToken) ||
-      phraseToken.startsWith(textToken) ||
+      (phraseToken.startsWith(textToken) && phraseToken.length - textToken.length <= 2) ||
       (phraseToken.length >= 6 && textToken.length >= 6 && phraseToken.slice(0, 6) === textToken.slice(0, 6))
     ));
   });
@@ -457,15 +457,17 @@ export function isTextAllowedForIntent(text = "", queryInfo = {}) {
   const normalized = normalizeSearchText(text);
   const hasInclude = (def.include || []).some((kw) => {
     const normalizedKeyword = normalizeSearchText(kw);
+    const isSingleWord = normalizedKeyword.split(/\s+/).length === 1;
     return includesPhrase(normalized, normalizedKeyword) ||
-      hasTokenCompatibleMatch(normalized, normalizedKeyword);
+      (isSingleWord && hasTokenCompatibleMatch(normalized, normalizedKeyword));
   });
   if (!hasInclude) return false;
 
   const hasExclude = (def.exclude || []).some((kw) => {
     const normalizedKeyword = normalizeSearchText(kw);
+    const isSingleWord = normalizedKeyword.split(/\s+/).length === 1;
     return includesPhrase(normalized, normalizedKeyword) ||
-      hasTokenCompatibleMatch(normalized, normalizedKeyword);
+      (isSingleWord && hasTokenCompatibleMatch(normalized, normalizedKeyword));
   });
   if (hasExclude) return false;
 

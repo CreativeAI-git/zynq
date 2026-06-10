@@ -60,7 +60,7 @@ async function createSearchChatCompletion(payload, context = "search_similarity"
     return result;
   } catch (error) {
     const errMsg = error?.code || error?.name || error?.message || "unknown";
-    console.error(`[${context}] OpenAI failed [${errMsg}]`);
+    console.error(`[${context}] OpenAI failed [${errMsg}]`, error);
     return null;
   }
 }

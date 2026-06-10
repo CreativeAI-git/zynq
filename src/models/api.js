@@ -6,7 +6,7 @@ import { name } from "ejs";
 import { getClinicMappedTreatments } from "./clinic.js";
 import { buildGraphRelationMeta, getGraphExpansionThreshold, mergeGraphAwareResults } from "../utils/search_graph.util.js";
 import { parseSearchIntent, isTextAllowedForIntent, normalizeSearchText } from "../search/intent_taxonomy.js";
-import { restoreCanonicalBrandTerms } from "../search/protected_terms.js";
+import { restoreCanonicalBrandTerms, containsProtectedTerm } from "../search/protected_terms.js";
 import { enforceDeviceSectionCandidates } from "../search/typed_sections.js";
 import { buildQueryProfile, computeAdaptiveCap, computeAdaptiveThreshold } from "../search/query_profile.js";
 
@@ -3874,7 +3874,14 @@ export const getRelationshipAwareSearchExpansion = async ({
             treatment_name: restoreCanonicalBrandTerms(language === "en" ? row.treatment_name : (row.treatment_swedish || row.treatment_name))
         }));
 
-        if (exactDeviceIdSet.size > 0) {
+        const queryIsBrandOrSpecificDevice =
+            containsProtectedTerm(normalized) ||
+            exactDeviceRows.some(
+                (r) => (r.device_name || "").toLowerCase() === normalized ||
+                       (r.device_swedish || "").toLowerCase() === normalized
+            );
+
+        if (exactDeviceIdSet.size > 0 && queryIsBrandOrSpecificDevice) {
             enrichedDevices = enrichedDevices.filter((row) => exactDeviceIdSet.has(row.device_id));
         }
 
