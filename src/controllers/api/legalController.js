@@ -1,5 +1,8 @@
 
-import { gemini, openai } from "../../../app.js";
+import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const gemini = process.env.GEMINI_API_KEY ? new GoogleGenAI({}) : null;
 import configs from "../../config/config.js";
 import { addConsentModel, getLegalDocumentsForUsers, updateLegalDocumentsService } from "../../models/api.js";
 import { asyncHandler, handleError, handleSuccess, } from "../../utils/responseHandler.js";

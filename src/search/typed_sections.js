@@ -70,6 +70,11 @@ function evaluateTechnologyCompatibility(queryInfo = {}, rowText = "") {
   const queryBucket = normalizeSearchText(queryInfo?.intentBucket || "");
   if (!queryBucket) return true;
 
+  // If the query is a specific laser technology, check if the device text matches it directly
+  if (SPECIFIC_LASER_BUCKETS.has(queryBucket)) {
+    return isTextAllowedForIntent(rowText, queryInfo);
+  }
+
   const rowBucket = normalizeSearchText(parseSearchIntent(rowText)?.intentBucket || "");
   if (!rowBucket) return true;
 

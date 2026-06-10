@@ -11,7 +11,8 @@ import { formatImagePath, generateAccessToken, generatePassword, generateVerific
 import { fileURLToPath } from 'url';
 import { fetchChatById, getChatBetweenUsers } from "../../models/chat.js";
 import { formatBenefitsUnified, getTreatmentIDsByUserID, localizeTextValue } from "../../utils/misc.util.js";
-import { openai } from "../../../app.js";
+import OpenAI from "openai";
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 import { translator } from "../../utils/misc.util.js";
 import { mergeGraphAwareResults } from "../../utils/search_graph.util.js";
 import { parseSearchIntent } from "../../search/intent_taxonomy.js";
@@ -179,6 +180,9 @@ async function normalizeSearchQueryForIntent(search = "", language = "en", trans
 function shouldExpandRelatedSearch(queryInfo = {}, search = "") {
     const normalized = String(queryInfo?.normalized || search || "").trim();
     if (!normalized) return false;
+
+    // If query contains a protected brand/medical term, always allow expansion
+    if (containsProtectedTerm(normalized)) return true;
 
     // Keep broader or canonical medical queries eligible, but avoid spraying
     // related results for one-off admin/test words like "zelda".
@@ -1120,7 +1124,6 @@ export const detectSearchIntentController = asyncHandler(async (req, res) => {
 export const getDoctorsByFirstNameSearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    // const { search, page, limit } = getSearchRequestContext(req);
     const { search, page, limit } = getSearchRequestContext(req);
 
     if (!search) {
@@ -1128,7 +1131,6 @@ export const getDoctorsByFirstNameSearchOnlyController = asyncHandler(async (req
     }
 
     try {
-        // const normalized_search = await normalizeSearchQuery(search, language, true);
         const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
@@ -1137,22 +1139,52 @@ export const getDoctorsByFirstNameSearchOnlyController = asyncHandler(async (req
             return handleError(res, 200, language, "Invalid Search", []);
         }
 
+        const queryInfo = parseSearchIntent(normalized_search || search);
 
-        // 2️⃣ Run all searches (as you already do)
-        const [doctors] = await Promise.all([
-
+        // Run primary doctor search in parallel with device and treatment searches for seeding graph expansion
+        const [doctors, devices, treatments] = await Promise.all([
             userModels.getDoctorsByFirstNameSearchOnly({ search: normalized_search, page, limit }),
+            userModels.getDevicesByNameSearchOnly({ search: normalized_search, page, limit }),
+            userModels.getTreatmentsBySearchOnly({ search: normalized_search, language, page, limit, actualSearch: search })
         ]);
 
+        const typedPrimaryDevices = enforceDeviceSectionCandidates(devices, queryInfo, {
+            minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
+        });
 
-        // 3️⃣ Enrich and localize the final response without changing shape
-        const enrichedDoctors = await Promise.all(
-            doctors.map(({ embeddings, ...doctor }) => localizeDoctorSearchResult(doctor, language))
+        const relationExpansion = shouldExpandRelatedSearch(queryInfo, normalized_search)
+            ? await userModels.getRelationshipAwareSearchExpansion({
+                search: normalized_search,
+                language,
+                seedDevices: typedPrimaryDevices.accepted,
+                seedTreatments: treatments
+            })
+            : { devices: [], treatments: [], doctors: [], clinics: [], debug: {} };
+
+        // Align schemas and formats before merging
+        const formattedDoctors = doctors.map(doctor => ({
+            ...doctor,
+            profile_image: formatImagePath(doctor.profile_image, 'doctor/profile_images')
+        }));
+
+        const relationDoctors = (relationExpansion.doctors || []).map((doctor) => ({
+            ...doctor,
+            profile_image: formatImagePath(doctor.profile_image, 'doctor/profile_images')
+        }));
+
+        const mergedDoctors = mergeGraphAwareResults(formattedDoctors, relationDoctors, {
+            keySelector: (row) => `${row?.doctor_id || ""}:${row?.clinic_id || ""}`,
+            nameSelector: (row) => `${row?.name || ""} ${row?.last_name || ""}`.trim(),
+            scoreSelector: (row) => row?.final_score ?? row?.score ?? 0,
+            primaryPriority: 1,
+            relatedDefaultPriority: 2
+        });
+
+        const localizedDoctors = await Promise.all(
+            mergedDoctors.map(({ embeddings, ...doctor }) => localizeDoctorSearchResult(doctor, language))
         );
 
-
-        // 5️⃣ Return ranked response
-        return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', enrichedDoctors);
+        return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', localizedDoctors);
 
     } catch (error) {
         console.error("Search Home Error:", error);
@@ -1163,7 +1195,6 @@ export const getDoctorsByFirstNameSearchOnlyController = asyncHandler(async (req
 export const getClinicsByNameSearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    // const { search, page, limit } = getSearchRequestContext(req);
     const { search, page, limit } = getSearchRequestContext(req);
 
     if (!search) {
@@ -1171,7 +1202,6 @@ export const getClinicsByNameSearchOnlyController = asyncHandler(async (req, res
     }
 
     try {
-        // const normalized_search = await normalizeSearchQuery(search, language, true);
         const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
@@ -1180,22 +1210,51 @@ export const getClinicsByNameSearchOnlyController = asyncHandler(async (req, res
             return handleError(res, 200, language, "Invalid Search", []);
         }
 
+        const queryInfo = parseSearchIntent(normalized_search || search);
 
-        // 2️⃣ Run all searches (as you already do)
-        const [clinics] = await Promise.all([
-
-            userModels.getClinicsByNameSearchOnly({ search: normalized_search, page, limit })
+        // Run primary clinic search in parallel with device and treatment searches for seeding graph expansion
+        const [clinics, devices, treatments] = await Promise.all([
+            userModels.getClinicsByNameSearchOnly({ search: normalized_search, page, limit }),
+            userModels.getDevicesByNameSearchOnly({ search: normalized_search, page, limit }),
+            userModels.getTreatmentsBySearchOnly({ search: normalized_search, language, page, limit, actualSearch: search })
         ]);
 
+        const typedPrimaryDevices = enforceDeviceSectionCandidates(devices, queryInfo, {
+            minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
+        });
 
-        // 3️⃣ Enrich and localize the final response without changing shape
-        const enrichedClinics = await Promise.all(
-            clinics.map((clinic) => localizeClinicSearchResult(clinic, language))
+        const relationExpansion = shouldExpandRelatedSearch(queryInfo, normalized_search)
+            ? await userModels.getRelationshipAwareSearchExpansion({
+                search: normalized_search,
+                language,
+                seedDevices: typedPrimaryDevices.accepted,
+                seedTreatments: treatments
+            })
+            : { devices: [], treatments: [], doctors: [], clinics: [], debug: {} };
+
+        const enrichedClinics = clinics.map(clinic => ({
+            ...clinic,
+            clinic_logo: formatImagePath(clinic.clinic_logo, 'clinic/logo')
+        }));
+
+        const relationClinics = (relationExpansion.clinics || []).map((clinic) => ({
+            ...clinic,
+            clinic_logo: formatImagePath(clinic.clinic_logo, 'clinic/logo')
+        }));
+
+        const mergedClinics = mergeGraphAwareResults(enrichedClinics, relationClinics, {
+            keySelector: (row) => row?.clinic_id,
+            nameSelector: (row) => row?.clinic_name || "",
+            scoreSelector: (row) => row?.final_score ?? row?.score ?? 0,
+            primaryPriority: 1,
+            relatedDefaultPriority: 2
+        });
+
+        const localizedClinics = await Promise.all(
+            mergedClinics.map((clinic) => localizeClinicSearchResult(clinic, language))
         );
 
-
-        // 5️⃣ Return ranked response
-        return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', enrichedClinics);
+        return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', localizedClinics);
 
     } catch (error) {
         console.error("Search Home Error:", error);
@@ -1207,7 +1266,6 @@ export const getClinicsByNameSearchOnlyController = asyncHandler(async (req, res
 export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res) => {
     const { language = 'en' } = req.user || {};
 
-    // const { search, page, limit } = getSearchRequestContext(req);
     const { search, page, limit } = getSearchRequestContext(req);
 
     if (!search) {
@@ -1215,7 +1273,6 @@ export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res
     }
 
     try {
-        // const normalized_search = await normalizeSearchQuery(search, language, true);
         const normalized_search = await normalizeSearchQuery(search, language, true);
         // 🧠 Detect if the translated text is gibberish
         const gibberish = isGibberishText(normalized_search);
@@ -1224,20 +1281,43 @@ export const getDevicesByNameSearchOnlyController = asyncHandler(async (req, res
             return handleError(res, 200, language, "Invalid Search", []);
         }
 
+        const queryInfo = parseSearchIntent(normalized_search || search);
 
-        // 2️⃣ Run all searches (as you already do)
-        const [devices] = await Promise.all([
-
+        // Run primary devices search in parallel with treatments search for seeding graph expansion
+        const [devices, treatments] = await Promise.all([
             userModels.getDevicesByNameSearchOnly({ search: normalized_search, page, limit }),
+            userModels.getTreatmentsBySearchOnly({ search: normalized_search, language, page, limit, actualSearch: search })
         ]);
 
+        const typedPrimaryDevices = enforceDeviceSectionCandidates(devices, queryInfo, {
+            minRelationshipStrength: queryInfo.intentType === "strict_category" ? 0.66 : 0.50
+        });
 
+        const relationExpansion = shouldExpandRelatedSearch(queryInfo, normalized_search)
+            ? await userModels.getRelationshipAwareSearchExpansion({
+                search: normalized_search,
+                language,
+                seedDevices: typedPrimaryDevices.accepted,
+                seedTreatments: treatments
+            })
+            : { devices: [], treatments: [], doctors: [], clinics: [], debug: {} };
+
+        const typedRelationDevices = enforceDeviceSectionCandidates(relationExpansion.devices || [], queryInfo, {
+            minRelationshipStrength: 0.68
+        });
+
+        const mergedDevices = mergeGraphAwareResults(typedPrimaryDevices.accepted, typedRelationDevices.accepted || [], {
+            keySelector: (row) => row?.id || `${row?.device_id || ""}:${row?.treatment_id || ""}`,
+            nameSelector: (row) => row?.device_name || "",
+            scoreSelector: (row) => row?.final_score ?? row?.score ?? 0,
+            primaryPriority: 1,
+            relatedDefaultPriority: 2
+        });
 
         const localizedDevices = await Promise.all(
-            devices.map((device) => localizeDeviceSearchResult(device, language))
+            mergedDevices.map((device) => localizeDeviceSearchResult(device, language))
         );
 
-        // 5️⃣ Return ranked response
         return handleSuccess(res, 200, language, 'SEARCH_RESULTS_FETCHED', localizedDevices);
 
     } catch (error) {
