@@ -179,13 +179,13 @@ async function normalizeSearchQuery(search = "", language = "en", translateLongQ
     const likelyNonEnglish =
         language !== "en" ||
         /[åäöÅÄÖ]/.test(trimmed) ||
-        /\b(mörka|morka|under ögon|laserbehandling|behandling|ringar|finnar|hårborttagning|huduppstramning|huduppstramande|hudtätning|hudatstramning|hudåtstramning|slapphet|fasthet|pigmentering|rodnad|rodhet|blodkarl|blodkärl|aknearr|akneärr|rynkor|rynka|linjer|kraksparkar|kråksparkar)\b/i.test(trimmed);
+        /\b(mörka|morka|under ögon|laserbehandling|behandling|ringar|finnar|hårborttagning|huduppstramning|huduppstramande|hudtätning|hudatstramning|hudåtstramning|slapphet|fasthet|pigmentering|rodnad|rodhet|blodkarl|blodkärl|aknearr|akneärr|rynkor|rynka|linjer|kraksparkar|kråksparkar|kemisk|peel|peeling|akne)\b/i.test(trimmed);
     const shouldTranslate = translateLongQuery && likelyNonEnglish;
     if (!shouldTranslate) return trimmed;
 
     // Keep protected brand/device terms intact while translating the rest of the query.
     const { protectedText, map } = protectTermsInText(trimmed);
-    const translated = await translator(protectedText, "en");
+    const translated = await translator(protectedText, "en", true);
     return restoreProtectedTerms(translated, map).trim();
 }
 

@@ -2362,7 +2362,7 @@ WHERE t.is_deleted = 0
                 normalized_search = filters.search
             } else {
                 console.log("Long query, translating to english");
-                normalized_search = await translator(filters.search, 'en');
+                normalized_search = await translator(filters.search, 'en', true);
             }
             // 2️⃣ Compute top similar rows using embedding
             results = await getTreatmentsAIResult(results, normalized_search, 0.4, null, lang);
@@ -3486,7 +3486,7 @@ export const getRelationshipAwareSearchExpansion = async ({
 }) => {
     try {
         const queryInfo = parseSearchIntent(search || "");
-        const normalized = normalizeSearchText(search || "").toLowerCase();
+        const normalized = normalizeSearchText(search || "", { skipRewrite: true }).toLowerCase();
         if (!normalized) return { devices: [], treatments: [] };
 
         const collectDelimitedIds = (value) => {

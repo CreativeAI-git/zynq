@@ -332,13 +332,13 @@ function escapeRegex(value = "") {
 
 const NORMALIZE_TEXT_CACHE = new Map();
 
-export function normalizeSearchText(value = "") {
-  const cacheKey = String(value || "");
+export function normalizeSearchText(value = "", options = {}) {
+  const cacheKey = String(value || "") + (options.skipRewrite ? ":skip" : "");
   if (NORMALIZE_TEXT_CACHE.has(cacheKey)) {
     return NORMALIZE_TEXT_CACHE.get(cacheKey);
   }
 
-  const { protectedText, map } = protectTermsInText(cacheKey);
+  const { protectedText, map } = protectTermsInText(value);
   let out = protectedText
     .toLowerCase()
     .normalize("NFD")
@@ -347,9 +347,15 @@ export function normalizeSearchText(value = "") {
     .replace(/\s+/g, " ")
     .trim();
 
-  for (const [from, to] of Object.entries(TOKEN_REWRITE)) {
-    const escaped = escapeRegex(from);
-    out = out.replace(new RegExp(`\\b${escaped}\\b`, "g"), to);
+  if (!options.skipRewrite) {
+    const keys = Object.keys(TOKEN_REWRITE).sort((a, b) => b.length - a.length);
+    if (keys.length > 0) {
+      const regex = new RegExp(keys.map(k => `\\b${escapeRegex(k)}\\b`).join('|'), 'gi');
+      out = out.replace(regex, (matched) => {
+        const key = matched.toLowerCase();
+        return TOKEN_REWRITE[key] ?? matched;
+      });
+    }
   }
 
   out = out.replace(/\s+/g, " ").trim();

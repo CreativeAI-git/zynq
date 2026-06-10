@@ -422,7 +422,7 @@ export const getTreatmentsSuggestions = async (req, res) => {
     if (!keyword) return handleError(res, 400, "Keyword is required");
 
     // 🔹 Step 1: Normalize and embed the search keyword
-    const normalized_search = await translator(keyword, "en");
+    const normalized_search = await translator(keyword, "en", true);
     console.log("Normalized:", normalized_search);
 
     const embedRes = await axios.post("http://localhost:11434/api/embeddings", {
