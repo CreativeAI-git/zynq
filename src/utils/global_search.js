@@ -133,44 +133,49 @@ function renderEntityName(canonical = "", localized = "", options = {}) {
   return resolveProtectedDisplayName(canonical, localized, options);
 }
 
-async function localizeTreatmentResult(result = {}, language = "en") {
+function localizeTreatmentResult(result = {}, language = "en") {
   const lang = String(language || "en").toLowerCase();
-  const baseName = result.name || result.swedish || "";
-  const baseDescription = result.description_en || result.description_sv || result.description || "";
-  const baseBenefits = result.benefits_en || result.benefits_sv || result.benefits || "";
-  const baseDeviceName = result.device_name || result.device_name_swedish || "";
-  const baseLikeWiseTerms = result.like_wise_terms || result.like_wise_terms_swedish || "";
-  const baseTreatmentName = result.treatment_name || result.treatment_swedish || "";
 
-  const [nameEn, nameSv, descriptionEn, descriptionSv, benefitsEn, benefitsSv, deviceNameEn, deviceNameSv, likeWiseEn, likeWiseSv, treatmentNameEn, treatmentNameSv] = await Promise.all([
-    localizeTextValue(baseName, "en"),
-    localizeTextValue(baseName, "sv"),
-    localizeTextValue(baseDescription, "en"),
-    localizeTextValue(baseDescription, "sv"),
-    localizeTextValue(baseBenefits, "en"),
-    localizeTextValue(baseBenefits, "sv"),
-    localizeTextValue(baseDeviceName, "en"),
-    localizeTextValue(baseDeviceName, "sv"),
-    localizeTextValue(baseLikeWiseTerms, "en"),
-    localizeTextValue(baseLikeWiseTerms, "sv"),
-    localizeTextValue(baseTreatmentName, "en"),
-    localizeTextValue(baseTreatmentName, "sv")
-  ]);
+  const baseName = result.name || "";
+  const baseSwedish = result.swedish || baseName;
+
+  const nameEn = resolveProtectedDisplayName(baseName, baseName);
+  const nameSv = resolveProtectedDisplayName(baseName, baseSwedish);
+
+  // Description - DB has both EN and SV fields directly
+  const descriptionEn = result.description_en || result.description || "";
+  const descriptionSv = result.description_sv || result.description || descriptionEn;
+
+  // Benefits - DB has both EN and SV fields directly
+  const benefitsEn = result.benefits_en || result.benefits || "";
+  const benefitsSv = result.benefits_sv || result.benefits || benefitsEn;
+
+  // Device Name
+  const deviceNameEn = result.device_name || "";
+  const deviceNameSv = result.device_name_swedish || deviceNameEn;
+
+  // Likewise terms
+  const likeWiseEn = result.like_wise_terms || "";
+  const likeWiseSv = result.like_wise_terms_swedish || likeWiseEn;
+
+  // Treatment name
+  const treatmentNameEn = result.treatment_name || "";
+  const treatmentNameSv = result.treatment_swedish || treatmentNameEn;
 
   return {
     ...result,
-    name: resolveProtectedDisplayName(nameEn, nameEn),
-    swedish: resolveProtectedDisplayName(nameSv, nameSv),
+    name: nameEn,
+    swedish: nameSv,
     description_en: descriptionEn,
     description_sv: descriptionSv,
     benefits_en: benefitsEn,
     benefits_sv: benefitsSv,
     device_name: resolveProtectedDisplayName(deviceNameEn, deviceNameEn),
-    device_name_swedish: resolveProtectedDisplayName(deviceNameSv, deviceNameSv),
+    device_name_swedish: resolveProtectedDisplayName(deviceNameEn, deviceNameSv),
     like_wise_terms: resolveProtectedDisplayName(likeWiseEn, likeWiseEn),
-    like_wise_terms_swedish: resolveProtectedDisplayName(likeWiseSv, likeWiseSv),
+    like_wise_terms_swedish: resolveProtectedDisplayName(likeWiseEn, likeWiseSv),
     treatment_name: resolveProtectedDisplayName(treatmentNameEn, treatmentNameEn),
-    treatment_swedish: resolveProtectedDisplayName(treatmentNameSv, treatmentNameSv),
+    treatment_swedish: resolveProtectedDisplayName(treatmentNameEn, treatmentNameSv),
     description: lang === "sv" ? descriptionSv : descriptionEn,
     benefits: lang === "sv" ? benefitsSv : benefitsEn
   };
@@ -810,11 +815,21 @@ export const getSubTreatmentsAIResult = async (
     .sort((a, b) => b.final_score - a.final_score);
 
   // ----- Step 5: Translate if needed -----
-  const translated = await Promise.all(filtered.map(async (r) => ({
-    ...r,
-    name: await localizeTextValue(r.name || r.swedish || "", language),
-    treatment_name: await localizeTextValue(r.treatment_name || r.treatment_swedish || "", language),
-  })));
+  const lang = String(language || "en").toLowerCase();
+  const translated = filtered.map((r) => {
+    const baseName = r.name || "";
+    const baseSwedish = r.swedish || baseName;
+    const baseTreatmentName = r.treatment_name || "";
+    const baseTreatmentSwedish = r.treatment_swedish || baseTreatmentName;
+
+    return {
+      ...r,
+      name: resolveProtectedDisplayName(baseName, lang === "sv" ? baseSwedish : baseName),
+      swedish: resolveProtectedDisplayName(baseName, baseSwedish),
+      treatment_name: resolveProtectedDisplayName(baseTreatmentName, lang === "sv" ? baseTreatmentSwedish : baseTreatmentName),
+      treatment_swedish: resolveProtectedDisplayName(baseTreatmentName, baseTreatmentSwedish),
+    };
+  });
 
   // ----- Step 6: Limit top N if requested -----
   return topN ? translated.slice(0, topN) : translated;

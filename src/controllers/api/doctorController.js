@@ -16,7 +16,7 @@ import { translator } from "../../utils/misc.util.js";
 import { mergeGraphAwareResults } from "../../utils/search_graph.util.js";
 import { parseSearchIntent } from "../../search/intent_taxonomy.js";
 import { enforceDeviceSectionCandidates } from "../../search/typed_sections.js";
-import { containsProtectedTerm, protectTermsInText, restoreProtectedTerms, resolveProtectedDisplayName } from "../../search/protected_terms.js";
+import { containsProtectedTerm, protectTermsInText, restoreProtectedTerms, resolveProtectedDisplayName, restoreCanonicalBrandTerms } from "../../search/protected_terms.js";
 
 
 /**
@@ -97,60 +97,47 @@ async function localizeClinicSearchResult(clinic = {}, language = "en") {
     };
 }
 
-async function localizeDeviceSearchResult(device = {}, language = "en") {
+function localizeDeviceSearchResult(device = {}, language = "en") {
+    const lang = String(language || "en").toLowerCase();
     const baseDeviceName = device.device_name || device.device_swedish || "";
 
-    // treatment_name may be a GROUP_CONCAT comma-separated string like "Pico Laser,Botox,IPL"
-    // Protect brand terms → localize each part → restore protected terms
-    const localizeCommaSeparated = async (str, lang) => {
-        if (!str) return str;
-        const parts = String(str).split(",").map(s => s.trim()).filter(Boolean);
-        const localized = await Promise.all(parts.map(async (p) => {
-            const { protectedText, map } = protectTermsInText(p);
-            const translated = await localizeTextValue(protectedText, lang);
-            return restoreProtectedTerms(translated, map);
-        }));
-        return localized.join(", ");
-    };
-
-    const baseTreatmentName = device.treatment_name || device.treatment_swedish || "";
-    const baseTreatmentSwedish = device.treatment_swedish || device.treatment_name || "";
-
-    const [treatmentNameLocalized, treatmentSwedishLocalized] = await Promise.all([
-        localizeCommaSeparated(baseTreatmentName, language),
-        localizeCommaSeparated(baseTreatmentSwedish, "sv")
-    ]);
+    // treatment_name/treatment_swedish come directly from DB as brand-term strings
+    // Use restoreCanonicalBrandTerms for safe local normalization — no external API
+    const treatmentName = restoreCanonicalBrandTerms(device.treatment_name || device.treatment_swedish || "");
+    const treatmentSwedish = restoreCanonicalBrandTerms(device.treatment_swedish || device.treatment_name || "");
 
     return {
         ...device,
         // Device names are brand terms — preserve canonical casing, do NOT translate
         device_name: resolveProtectedDisplayName(baseDeviceName, baseDeviceName),
-        device_swedish: resolveProtectedDisplayName(baseDeviceName, baseDeviceName),
-        treatment_name: treatmentNameLocalized,
-        treatment_swedish: treatmentSwedishLocalized,
-        associated_treatments: await Promise.all((device.associated_treatments || []).map(async (treatment) => {
-            const base = treatment?.name || treatment?.swedish || "";
-            const { protectedText: protectedBase, map: baseMap } = protectTermsInText(base);
-            const [localizedName, localizedSwedish] = await Promise.all([
-                localizeTextValue(protectedBase, language).then(t => restoreProtectedTerms(t, baseMap)),
-                localizeTextValue(protectedBase, "sv").then(t => restoreProtectedTerms(t, baseMap))
-            ]);
+        device_swedish: resolveProtectedDisplayName(baseDeviceName, device.device_swedish || baseDeviceName),
+        treatment_name: lang === "sv" ? treatmentSwedish : treatmentName,
+        treatment_swedish: treatmentSwedish,
+        associated_treatments: (device.associated_treatments || []).map((treatment) => {
+            const baseName = treatment?.name || "";
+            const baseSwedish = treatment?.swedish || baseName;
             return {
                 ...treatment,
-                name: resolveProtectedDisplayName(base, localizedName),
-                swedish: resolveProtectedDisplayName(base, localizedSwedish)
+                name: resolveProtectedDisplayName(baseName, lang === "sv" ? baseSwedish : baseName),
+                swedish: resolveProtectedDisplayName(baseName, baseSwedish)
             };
-        }))
+        })
     };
 }
 
-async function localizeSubTreatmentSearchResult(subTreatment = {}, language = "en") {
+function localizeSubTreatmentSearchResult(subTreatment = {}, language = "en") {
+    const lang = String(language || "en").toLowerCase();
+    const baseName = subTreatment.name || "";
+    const baseSwedish = subTreatment.swedish || baseName;
+    const baseTreatmentName = subTreatment.treatment_name || "";
+    const baseTreatmentSwedish = subTreatment.treatment_swedish || baseTreatmentName;
+
     return {
         ...subTreatment,
-        name: await localizeTextValue(subTreatment.name || subTreatment.swedish || "", language),
-        swedish: await localizeTextValue(subTreatment.swedish || subTreatment.name || "", "sv"),
-        treatment_name: await localizeTextValue(subTreatment.treatment_name || subTreatment.treatment_swedish || "", language),
-        treatment_swedish: await localizeTextValue(subTreatment.treatment_swedish || subTreatment.treatment_name || "", "sv")
+        name: resolveProtectedDisplayName(baseName, lang === "sv" ? baseSwedish : baseName),
+        swedish: resolveProtectedDisplayName(baseName, baseSwedish),
+        treatment_name: resolveProtectedDisplayName(baseTreatmentName, lang === "sv" ? baseTreatmentSwedish : baseTreatmentName),
+        treatment_swedish: resolveProtectedDisplayName(baseTreatmentName, baseTreatmentSwedish)
     };
 }
 
