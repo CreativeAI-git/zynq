@@ -70,9 +70,15 @@ import {
     checkExistingConcernByNameModel,
     checkExistingLikeWiseTermsByNameModel,
     checkExistingDeviceByNameModel,
-    checkExistingBenefitByNameModel
+    checkExistingBenefitByNameModel,
+    getTreatmentSearchTagsOnlyModel,
+    getAllTreatmentSearchTagsModel,
+    checkTagsExistForTreatmentModel,
+    addTreatmentTagsModel,
+    updateTreatmentTagsModel
 } from "../../models/admin.js";
 import { getTreatmentsByConcernId } from "../../models/api.js";
+import axios from "axios";
 import { NOTIFICATION_MESSAGES, sendNotification } from "../../services/notifications.service.js";
 import { asyncHandler, handleError, handleSuccess, } from "../../utils/responseHandler.js";
 import { googleTranslator, isEmpty } from "../../utils/user_helper.js";
@@ -104,7 +110,14 @@ export const getTreatmentsByConcern = asyncHandler(async (req, res) => {
 });
 
 export const addEditTreatment = asyncHandler(async (req, res) => {
-    const { treatment_id, ...body } = req.body;
+    const {
+        treatment_id,
+        primary_tags,
+        concerns_tags,
+        benefits_tags,
+        synonyms_tags,
+        ...body
+    } = req.body;
     const role = req.user?.role;
     const user_id = req.user?.id;
     const language = req.user?.language || 'en';
@@ -220,6 +233,39 @@ export const addEditTreatment = asyncHandler(async (req, res) => {
         if (!isAdmin) await addTreatmentSubTreatmentUserModel(treatment_id, req.body.sub_treatments, user_id);
         if (isAdmin) await addTreatmentSubTreatmentModel(treatment_id, req.body.sub_treatments);
 
+        // 🏷️ Search tags upsert (EDIT flow only, when tag variables are defined)
+        if (primary_tags !== undefined || concerns_tags !== undefined || benefits_tags !== undefined || synonyms_tags !== undefined) {
+            const hasTags = await checkTagsExistForTreatmentModel(treatment_id);
+            if (hasTags) {
+                const tagsToUpdate = {};
+                if (primary_tags !== undefined) tagsToUpdate.primary_tags = JSON.stringify(primary_tags || []);
+                if (concerns_tags !== undefined) tagsToUpdate.concerns = JSON.stringify(concerns_tags || []);
+                if (benefits_tags !== undefined) tagsToUpdate.benefits = JSON.stringify(benefits_tags || []);
+                if (synonyms_tags !== undefined) tagsToUpdate.synonyms = JSON.stringify(synonyms_tags || []);
+
+                tagsToUpdate.entity_name = dbData.name;
+                tagsToUpdate.swedish_name = dbData.swedish;
+                tagsToUpdate.classification = dbData.classification_type;
+
+                await updateTreatmentTagsModel(treatment_id, tagsToUpdate);
+            } else {
+                const tagsToInsert = {
+                    entity_id: treatment_id,
+                    entity_type: 'treatment',
+                    entity_name: dbData.name,
+                    swedish_name: dbData.swedish,
+                    primary_tags: JSON.stringify(primary_tags || []),
+                    concerns: JSON.stringify(concerns_tags || []),
+                    benefits: JSON.stringify(benefits_tags || []),
+                    synonyms: JSON.stringify(synonyms_tags || []),
+                    excludes: '[]',
+                    intent_category: 'treatment',
+                    classification: dbData.classification_type,
+                    raw_source: '{}'
+                };
+                await addTreatmentTagsModel(tagsToInsert);
+            }
+        }
     }
 
     // ✳️ CREATE FLOW
@@ -261,6 +307,36 @@ export const addEditTreatment = asyncHandler(async (req, res) => {
         if (req.body.sub_treatments?.length > 0)
             if (!isAdmin) await addTreatmentSubTreatmentUserModel(dbData.treatment_id, req.body.sub_treatments, user_id);
         if (isAdmin) await addTreatmentSubTreatmentModel(dbData.treatment_id, req.body.sub_treatments);
+
+        // 🔗 Call Fast API search entity sync
+        try {
+            await axios.post(
+                "https://getzynq.io:8000/api/v1/search/entity",
+                {
+                    entity_id: dbData.treatment_id,
+                    dry_run: false,
+                    force: false
+                },
+                {
+                    headers: {
+                        accept: "application/json",
+                        "Content-Type": "application/json"
+                    },
+                    timeout: 10000 // 10 second timeout
+                }
+            );
+            console.log("✅ Fast API search entity sync completed successfully");
+        } catch (fastApiErr) {
+            console.error("❌ Fast API search entity sync failed:", fastApiErr.message);
+        }
+    }
+
+    // 🧠 Call generateTreatmentEmbeddingsV2 in a try-catch block
+    try {
+        const targetId = treatment_id || dbData.treatment_id;
+        await generateTreatmentEmbeddingsV2(targetId);
+    } catch (embedErr) {
+        console.error("❌ Failed to generate embeddings during add/edit treatment:", embedErr.message);
     }
 
     // FINAL RESPONSE
@@ -575,6 +651,38 @@ export const getAllTreatments = asyncHandler(async (req, res) => {
         treatments = await getAllTreatmentsModel();
     }
 
+    // Fetch and map search tags
+    const searchTagsList = await getAllTreatmentSearchTagsModel();
+    const tagsMap = new Map();
+    if (searchTagsList && searchTagsList.length > 0) {
+        searchTagsList.forEach(row => {
+            tagsMap.set(row.entity_id, row);
+        });
+    }
+
+    const parseJSON = (str, defaultValue = []) => {
+        try {
+            return str ? (typeof str === 'string' ? JSON.parse(str) : str) : defaultValue;
+        } catch {
+            return defaultValue;
+        }
+    };
+
+    for (const t of treatments) {
+        const tags = tagsMap.get(t.treatment_id);
+        if (tags) {
+            t.primary_tags = parseJSON(tags.primary_tags, []);
+            t.concerns_tags = parseJSON(tags.concerns, []);
+            t.benefits_tags = parseJSON(tags.benefits, []);
+            t.synonyms_tags = parseJSON(tags.synonyms, []);
+        } else {
+            t.primary_tags = [];
+            t.concerns_tags = [];
+            t.benefits_tags = [];
+            t.synonyms_tags = [];
+        }
+    }
+
     const approved = [];
     const others = [];
 
@@ -662,7 +770,31 @@ export const getAllTreatmentById = asyncHandler(async (req, res) => {
         })
     );
 
-    return handleSuccess(res, 200, language, "TREATMENTS_FETCHED", applyLanguageOverwrite(treatments[0], language));
+    const firstTreatment = treatments[0];
+    const parseJSON = (str, defaultValue = []) => {
+        try {
+            return str ? (typeof str === 'string' ? JSON.parse(str) : str) : defaultValue;
+        } catch {
+            return defaultValue;
+        }
+    };
+
+    if (firstTreatment) {
+        const searchTags = await getTreatmentSearchTagsOnlyModel(firstTreatment.treatment_id);
+        if (searchTags) {
+            firstTreatment.primary_tags = parseJSON(searchTags.primary_tags, []);
+            firstTreatment.concerns_tags = parseJSON(searchTags.concerns, []);
+            firstTreatment.benefits_tags = parseJSON(searchTags.benefits, []);
+            firstTreatment.synonyms_tags = parseJSON(searchTags.synonyms, []);
+        } else {
+            firstTreatment.primary_tags = [];
+            firstTreatment.concerns_tags = [];
+            firstTreatment.benefits_tags = [];
+            firstTreatment.synonyms_tags = [];
+        }
+    }
+
+    return handleSuccess(res, 200, language, "TREATMENTS_FETCHED", applyLanguageOverwrite(firstTreatment, language));
 });
 
 export const addEditConcern = asyncHandler(async (req, res) => {

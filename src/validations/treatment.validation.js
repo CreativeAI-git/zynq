@@ -75,6 +75,10 @@ export const addEditTreatmentSchema = joi.object({
   sub_treatments: idArrayValidation,
   device_ids: joi.array().items(joi.string().uuid()).allow(null).optional(),
   like_wise_terms_ids: joi.array().items(joi.string().uuid()).allow(null).optional(),
+  primary_tags: joi.array().items(joi.string()).optional(),
+  concerns_tags: joi.array().items(joi.string()).optional(),
+  benefits_tags: joi.array().items(joi.string()).optional(),
+  synonyms_tags: joi.array().items(joi.string()).optional(),
 })
 
 export const addEditSubtreatmentSchema = joi.object({
