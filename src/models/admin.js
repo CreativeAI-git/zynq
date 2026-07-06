@@ -4436,3 +4436,68 @@ export const getTreatmentLikeWiseTermsModel = async (treatment_id) => {
         throw error;
     }
 };
+
+export const getTreatmentSearchTagsOnlyModel = async (treatment_id) => {
+    if (!treatment_id) return null;
+
+    try {
+        const query = `
+            SELECT primary_tags, concerns, benefits, synonyms
+            FROM entity_search_tags
+            WHERE entity_id = ? AND entity_type = 'treatment'
+        `;
+        const rows = await db.query(query, [treatment_id]);
+        return rows[0];
+    } catch (error) {
+        console.error("getTreatmentSearchTagsOnlyModel error:", error);
+        throw error;
+    }
+};
+
+export const getAllTreatmentSearchTagsModel = async () => {
+    try {
+        const query = `
+            SELECT entity_id, primary_tags, concerns, benefits, synonyms
+            FROM entity_search_tags
+            WHERE entity_type = 'treatment'
+        `;
+        return await db.query(query);
+    } catch (error) {
+        console.error("getAllTreatmentSearchTagsModel error:", error);
+        throw error;
+    }
+};
+
+export const checkTagsExistForTreatmentModel = async (treatment_id) => {
+    try {
+        const query = `SELECT id FROM entity_search_tags WHERE entity_id = ? AND entity_type = 'treatment'`;
+        const rows = await db.query(query, [treatment_id]);
+        return rows.length > 0;
+    } catch (error) {
+        console.error("checkTagsExistForTreatmentModel error:", error);
+        throw error;
+    }
+};
+
+export const addTreatmentTagsModel = async (data) => {
+    try {
+        const query = `INSERT INTO entity_search_tags SET ?`;
+        return await db.query(query, [data]);
+    } catch (error) {
+        console.error("addTreatmentTagsModel error:", error);
+        throw error;
+    }
+};
+
+export const updateTreatmentTagsModel = async (treatment_id, data) => {
+    try {
+        const query = `UPDATE entity_search_tags SET ? WHERE entity_id = ? AND entity_type = 'treatment'`;
+        return await db.query(query, [data, treatment_id]);
+    } catch (error) {
+        console.error("updateTreatmentTagsModel error:", error);
+        throw error;
+    }
+};
+
+
+
