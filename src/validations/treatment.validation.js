@@ -164,6 +164,10 @@ export const addEditDevicesSchema = joi.object({
   language: joi.string().valid("en", "sv").optional().allow("", null),
   name: stringValidation,
   swedish: stringValidation.optional(),
+  primary_tags: joi.array().items(joi.string()).optional(),
+  concerns_tags: joi.array().items(joi.string()).optional(),
+  benefits_tags: joi.array().items(joi.string()).optional(),
+  synonyms_tags: joi.array().items(joi.string()).optional(),
 });
 
 export const deleteDevicesSchema = joi.object({

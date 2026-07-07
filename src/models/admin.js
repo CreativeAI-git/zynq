@@ -4499,5 +4499,64 @@ export const updateTreatmentTagsModel = async (treatment_id, data) => {
     }
 };
 
+export const getDeviceSearchTagsOnlyModel = async (device_id) => {
+    if (!device_id) return null;
 
+    try {
+        const query = `
+            SELECT primary_tags, concerns, benefits, synonyms
+            FROM entity_search_tags
+            WHERE entity_id = ? AND entity_type = 'device'
+        `;
+        const rows = await db.query(query, [device_id]);
+        return rows[0];
+    } catch (error) {
+        console.error("getDeviceSearchTagsOnlyModel error:", error);
+        throw error;
+    }
+};
 
+export const getAllDeviceSearchTagsModel = async () => {
+    try {
+        const query = `
+            SELECT entity_id, primary_tags, concerns, benefits, synonyms
+            FROM entity_search_tags
+            WHERE entity_type = 'device'
+        `;
+        return await db.query(query);
+    } catch (error) {
+        console.error("getAllDeviceSearchTagsModel error:", error);
+        throw error;
+    }
+};
+
+export const checkTagsExistForDeviceModel = async (device_id) => {
+    try {
+        const query = `SELECT id FROM entity_search_tags WHERE entity_id = ? AND entity_type = 'device'`;
+        const rows = await db.query(query, [device_id]);
+        return rows.length > 0;
+    } catch (error) {
+        console.error("checkTagsExistForDeviceModel error:", error);
+        throw error;
+    }
+};
+
+export const addDeviceTagsModel = async (data) => {
+    try {
+        const query = `INSERT INTO entity_search_tags SET ?`;
+        return await db.query(query, [data]);
+    } catch (error) {
+        console.error("addDeviceTagsModel error:", error);
+        throw error;
+    }
+};
+
+export const updateDeviceTagsModel = async (device_id, data) => {
+    try {
+        const query = `UPDATE entity_search_tags SET ? WHERE entity_id = ? AND entity_type = 'device'`;
+        return await db.query(query, [data, device_id]);
+    } catch (error) {
+        console.error("updateDeviceTagsModel error:", error);
+        throw error;
+    }
+};
