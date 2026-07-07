@@ -75,7 +75,12 @@ import {
     getAllTreatmentSearchTagsModel,
     checkTagsExistForTreatmentModel,
     addTreatmentTagsModel,
-    updateTreatmentTagsModel
+    updateTreatmentTagsModel,
+    getDeviceSearchTagsOnlyModel,
+    getAllDeviceSearchTagsModel,
+    checkTagsExistForDeviceModel,
+    addDeviceTagsModel,
+    updateDeviceTagsModel
 } from "../../models/admin.js";
 import { getTreatmentsByConcernId } from "../../models/api.js";
 import axios from "axios";
@@ -315,7 +320,8 @@ export const addEditTreatment = asyncHandler(async (req, res) => {
                 {
                     entity_id: dbData.treatment_id,
                     dry_run: false,
-                    force: false
+                    force: false,
+                    type: "treatment"
                 },
                 {
                     headers: {
@@ -1278,7 +1284,14 @@ export const updateLikeWiseTermsApprovalStatus = asyncHandler(async (req, res) =
 });
 
 export const addEditDevice = asyncHandler(async (req, res) => {
-    const { device_id: input_device_id, ...body } = req.body;
+    const {
+        device_id: input_device_id,
+        primary_tags,
+        concerns_tags,
+        benefits_tags,
+        synonyms_tags,
+        ...body
+    } = req.body;
     const role = req.user?.role;
     const user_id = req.user?.id;
     const language = req.user?.language || "en";
@@ -1317,6 +1330,39 @@ export const addEditDevice = asyncHandler(async (req, res) => {
         }
 
         await updateDeviceModel(device_id, dbData);
+
+        // 🏷️ Search tags upsert (EDIT flow only, when tag variables are defined)
+        if (primary_tags !== undefined || concerns_tags !== undefined || benefits_tags !== undefined || synonyms_tags !== undefined) {
+            const hasTags = await checkTagsExistForDeviceModel(device_id);
+            if (hasTags) {
+                const tagsToUpdate = {};
+                if (primary_tags !== undefined) tagsToUpdate.primary_tags = JSON.stringify(primary_tags || []);
+                if (concerns_tags !== undefined) tagsToUpdate.concerns = JSON.stringify(concerns_tags || []);
+                if (benefits_tags !== undefined) tagsToUpdate.benefits = JSON.stringify(benefits_tags || []);
+                if (synonyms_tags !== undefined) tagsToUpdate.synonyms = JSON.stringify(synonyms_tags || []);
+
+                tagsToUpdate.entity_name = dbData.name;
+                tagsToUpdate.swedish_name = dbData.swedish;
+
+                await updateDeviceTagsModel(device_id, tagsToUpdate);
+            } else {
+                const tagsToInsert = {
+                    entity_id: device_id,
+                    entity_type: 'device',
+                    entity_name: dbData.name,
+                    swedish_name: dbData.swedish,
+                    primary_tags: JSON.stringify(primary_tags || []),
+                    concerns: JSON.stringify(concerns_tags || []),
+                    benefits: JSON.stringify(benefits_tags || []),
+                    synonyms: JSON.stringify(synonyms_tags || []),
+                    excludes: '[]',
+                    intent_category: 'device',
+                    classification: null,
+                    raw_source: '{}'
+                };
+                await addDeviceTagsModel(tagsToInsert);
+            }
+        }
     }
     // ✳️ CREATE FLOW
     else {
@@ -1329,6 +1375,29 @@ export const addEditDevice = asyncHandler(async (req, res) => {
         dbData.device_id = device_id;
 
         await addDeviceModel(dbData);
+    }
+
+    // 🔗 Call Fast API search entity sync
+    try {
+        await axios.post(
+            "https://getzynq.io:8000/api/v1/search/entity",
+            {
+                entity_id: device_id,
+                dry_run: false,
+                force: false,
+                type: "device"
+            },
+            {
+                headers: {
+                    accept: "application/json",
+                    "Content-Type": "application/json"
+                },
+                timeout: 10000 // 10 second timeout
+            }
+        );
+        console.log("✅ Fast API search entity sync completed successfully for device:", device_id);
+    } catch (fastApiErr) {
+        console.error("❌ Fast API search entity sync failed for device:", fastApiErr.message);
     }
 
     const message = input_device_id
@@ -1546,6 +1615,38 @@ export const getAllDevices = asyncHandler(async (req, res) => {
         isAdmin ? null : user_id,
         isAdmin
     );
+
+    // Fetch and map search tags for devices
+    const searchTagsList = await getAllDeviceSearchTagsModel();
+    const tagsMap = new Map();
+    if (searchTagsList && searchTagsList.length > 0) {
+        searchTagsList.forEach(row => {
+            tagsMap.set(row.entity_id, row);
+        });
+    }
+
+    const parseJSON = (str, defaultValue = []) => {
+        try {
+            return str ? (typeof str === 'string' ? JSON.parse(str) : str) : defaultValue;
+        } catch {
+            return defaultValue;
+        }
+    };
+
+    for (const d of data) {
+        const tags = tagsMap.get(d.device_id);
+        if (tags) {
+            d.primary_tags = parseJSON(tags.primary_tags, []);
+            d.concerns_tags = parseJSON(tags.concerns, []);
+            d.benefits_tags = parseJSON(tags.benefits, []);
+            d.synonyms_tags = parseJSON(tags.synonyms, []);
+        } else {
+            d.primary_tags = [];
+            d.concerns_tags = [];
+            d.benefits_tags = [];
+            d.synonyms_tags = [];
+        }
+    }
 
     return handleSuccess(
         res,
