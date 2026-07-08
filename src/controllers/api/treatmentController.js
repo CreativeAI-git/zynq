@@ -705,6 +705,10 @@ export const getAllTreatments = asyncHandler(async (req, res) => {
         OTHERS: others
     };
 
+    if (isAdmin) {
+        return handleSuccess(res, 200, language, "TREATMENTS_FETCHED", response);
+    }
+
     return handleSuccess(res, 200, language, "TREATMENTS_FETCHED", applyLanguageOverwrite(response, language));
 });
 
