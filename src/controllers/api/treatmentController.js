@@ -1037,19 +1037,21 @@ export const cloneTreatment = asyncHandler(async (req, res) => {
         return handleError(res, 404, language, "TREATMENT_NOT_FOUND");
     }
 
-    // 2️⃣ Fetch relation IDs
+    // 2️⃣ Fetch relation IDs & search tags
     const [
         benefitMappings,
         deviceMappings,
         concernMappings,
         likeWiseMappings,
-        subTreatments
+        subTreatments,
+        originalTags
     ] = await Promise.all([
         getTreatmentBenefitsModel(treatment_id),
         getTreatmentDevicesModel(treatment_id),
         getTreatmentConcernsModel(treatment_id),
         getTreatmentLikeWiseTermsModel(treatment_id),
-        getTreatmentSubTreatmentsModel(treatment_id)
+        getTreatmentSubTreatmentsModel(treatment_id),
+        getTreatmentSearchTagsOnlyModel(treatment_id)
     ]);
 
     const benefit_ids = benefitMappings.map(b => b.benefit_id);
@@ -1099,6 +1101,61 @@ export const cloneTreatment = asyncHandler(async (req, res) => {
 
     if (subTreatments?.length > 0) {
         await addTreatmentSubTreatmentModel(newTreatmentId, subTreatments);
+    }
+
+    // 🏷️ Copy Search tags if they exist for original
+    if (originalTags) {
+        try {
+            const tagsToInsert = {
+                entity_id: newTreatmentId,
+                entity_type: 'treatment',
+                entity_name: clonedTreatment.name,
+                swedish_name: clonedTreatment.swedish,
+                primary_tags: typeof originalTags.primary_tags === 'string' ? originalTags.primary_tags : JSON.stringify(originalTags.primary_tags || []),
+                concerns: typeof originalTags.concerns === 'string' ? originalTags.concerns : JSON.stringify(originalTags.concerns || []),
+                benefits: typeof originalTags.benefits === 'string' ? originalTags.benefits : JSON.stringify(originalTags.benefits || []),
+                synonyms: typeof originalTags.synonyms === 'string' ? originalTags.synonyms : JSON.stringify(originalTags.synonyms || []),
+                excludes: typeof originalTags.excludes === 'string' ? originalTags.excludes : JSON.stringify(originalTags.excludes || []),
+                intent_category: originalTags.intent_category || 'treatment',
+                classification: clonedTreatment.classification_type,
+                raw_source: typeof originalTags.raw_source === 'string' ? originalTags.raw_source : JSON.stringify(originalTags.raw_source || {})
+            };
+            await addTreatmentTagsModel(tagsToInsert);
+            console.log("✅ Search tags cloned successfully for treatment:", newTreatmentId);
+        } catch (tagErr) {
+            console.error("❌ Failed to clone search tags for treatment:", tagErr.message);
+        }
+    }
+
+    // 🔗 Call Fast API search entity sync
+    try {
+        await axios.post(
+            "https://getzynq.io:8000/api/v1/search/entity",
+            {
+                entity_id: newTreatmentId,
+                dry_run: false,
+                force: false,
+                type: "treatment"
+            },
+            {
+                headers: {
+                    accept: "application/json",
+                    "Content-Type": "application/json"
+                },
+                timeout: 10000 // 10 second timeout
+            }
+        );
+        console.log("✅ Fast API search entity sync completed successfully for cloned treatment:", newTreatmentId);
+    } catch (fastApiErr) {
+        console.error("❌ Fast API search entity sync failed for cloned treatment:", fastApiErr.message);
+    }
+
+    // 🧠 Call generateTreatmentEmbeddingsV2 in a try-catch block
+    try {
+        await generateTreatmentEmbeddingsV2(newTreatmentId);
+        console.log("✅ Embeddings generated successfully for cloned treatment:", newTreatmentId);
+    } catch (embedErr) {
+        console.error("❌ Failed to generate embeddings for cloned treatment:", embedErr.message);
     }
 
     // 7️⃣ Response
