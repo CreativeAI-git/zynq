@@ -1086,6 +1086,8 @@ export const cloneTreatment = asyncHandler(async (req, res) => {
         is_admin_created: true,
         created_by_zynq_user_id: null,
         approval_status: "APPROVED",
+        embeddings: original.embeddings,
+        name_embeddings: original.name_embeddings
     };
 
     // 5️⃣ Insert treatment
@@ -1127,9 +1129,8 @@ export const cloneTreatment = asyncHandler(async (req, res) => {
         }
     }
 
-    // 🔗 Call Fast API search entity sync
-    try {
-        await axios.post(
+    // 🔗 Call Fast API search entity sync asynchronously (Non-blocking)
+    axios.post(
             "https://getzynq.io:8000/api/v1/search/entity",
             {
                 entity_id: newTreatmentId,
@@ -1144,19 +1145,11 @@ export const cloneTreatment = asyncHandler(async (req, res) => {
                 },
                 timeout: 10000 // 10 second timeout
             }
-        );
+    ).then(() => {
         console.log("✅ Fast API search entity sync completed successfully for cloned treatment:", newTreatmentId);
-    } catch (fastApiErr) {
+    }).catch(fastApiErr => {
         console.error("❌ Fast API search entity sync failed for cloned treatment:", fastApiErr.message);
-    }
-
-    // 🧠 Call generateTreatmentEmbeddingsV2 in a try-catch block
-    try {
-        await generateTreatmentEmbeddingsV2(newTreatmentId);
-        console.log("✅ Embeddings generated successfully for cloned treatment:", newTreatmentId);
-    } catch (embedErr) {
-        console.error("❌ Failed to generate embeddings for cloned treatment:", embedErr.message);
-    }
+    });
 
     // 7️⃣ Response
     handleSuccess(res, 201, language, "TREATMENT_CLONED_SUCCESSFULLY", {
