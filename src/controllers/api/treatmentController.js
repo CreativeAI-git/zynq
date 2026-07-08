@@ -316,9 +316,8 @@ export const addEditTreatment = asyncHandler(async (req, res) => {
         // 🔗 Call Fast API search entity sync
         try {
             await axios.post(
-                "https://getzynq.io:8000/api/v1/search/entity",
+                `https://getzynq.io:8000/api/v1/tags/entity/${dbData.treatment_id}`,
                 {
-                    entity_id: dbData.treatment_id,
                     dry_run: false,
                     force: false,
                     type: "treatment"
@@ -1131,9 +1130,8 @@ export const cloneTreatment = asyncHandler(async (req, res) => {
 
     // 🔗 Call Fast API search entity sync asynchronously (Non-blocking)
     axios.post(
-            "https://getzynq.io:8000/api/v1/search/entity",
+        `https://getzynq.io:8000/api/v1/tags/entity/${newTreatmentId}`,
             {
-                entity_id: newTreatmentId,
                 dry_run: false,
                 force: false,
                 type: "treatment"
@@ -1430,9 +1428,8 @@ export const addEditDevice = asyncHandler(async (req, res) => {
     // 🔗 Call Fast API search entity sync
     try {
         await axios.post(
-            "https://getzynq.io:8000/api/v1/search/entity",
+            `https://getzynq.io:8000/api/v1/tags/entity/${device_id}`,
             {
-                entity_id: device_id,
                 dry_run: false,
                 force: false,
                 type: "device"
