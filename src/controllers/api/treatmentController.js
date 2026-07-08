@@ -1089,8 +1089,8 @@ export const cloneTreatment = asyncHandler(async (req, res) => {
         is_admin_created: true,
         created_by_zynq_user_id: null,
         approval_status: "APPROVED",
-        embeddings: original.embeddings,
-        name_embeddings: original.name_embeddings
+        embeddings: original.embeddings ? (typeof original.embeddings === 'string' ? original.embeddings : JSON.stringify(original.embeddings)) : null,
+        name_embeddings: original.name_embeddings ? (typeof original.name_embeddings === 'string' ? original.name_embeddings : JSON.stringify(original.name_embeddings)) : null
     };
 
     // 5️⃣ Insert treatment
