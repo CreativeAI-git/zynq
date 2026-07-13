@@ -130,14 +130,10 @@ export const addEditTreatment = asyncHandler(async (req, res) => {
     const dbData = { ...body };
     delete dbData.language;
 
-    const translatedName = await translateStoredTextPair(dbData.name);
-    dbData.name = translatedName.en;
-    dbData.swedish = translatedName.sv;
-
-    const descriptionSource = dbData.description_en || dbData.description_sv || "";
-    const translatedDescription = await translateStoredTextPair(descriptionSource);
-    dbData.description_en = translatedDescription.en;
-    dbData.description_sv = translatedDescription.sv;
+    if (dbData.name) dbData.name = dbData.name.trim();
+    if (dbData.swedish) dbData.swedish = dbData.swedish.trim();
+    if (dbData.description_en) dbData.description_en = dbData.description_en.trim();
+    if (dbData.description_sv) dbData.description_sv = dbData.description_sv.trim();
 
 
     const benefits_ids = dbData.benefits_ids;
@@ -365,9 +361,8 @@ export const addEditSubtreatment = asyncHandler(async (req, res) => {
     const dbData = { ...body };
     delete dbData.language;
 
-    const translatedName = await translateStoredTextPair(dbData.name);
-    dbData.name = translatedName.en;
-    dbData.swedish = translatedName.sv;
+    if (dbData.name) dbData.name = dbData.name.trim();
+    if (dbData.swedish) dbData.swedish = dbData.swedish.trim();
 
     // 🧩 Creator metadata
     if (isAdmin) {
@@ -463,10 +458,8 @@ export const addEditSubTreatmentMaster = asyncHandler(async (req, res) => {
     let dbData = { ...body };
     delete dbData.language;
 
-    // 🌍 Store both English and Swedish versions from the same submitted text
-    const translatedName = await translateStoredTextPair(dbData.name);
-    dbData.name = translatedName.en;
-    dbData.swedish = translatedName.sv;
+    if (dbData.name) dbData.name = dbData.name.trim();
+    if (dbData.swedish) dbData.swedish = dbData.swedish.trim();
 
     // 🔐 Set creator & approval logic
     if (isAdmin) {
@@ -817,9 +810,8 @@ export const addEditConcern = asyncHandler(async (req, res) => {
 
     delete dbData.language;
 
-    const translatedName = await translateStoredTextPair(dbData.name);
-    dbData.name = translatedName.en;
-    dbData.swedish = translatedName.sv;
+    if (dbData.name) dbData.name = dbData.name.trim();
+    if (dbData.swedish) dbData.swedish = dbData.swedish.trim();
 
     // 🧩 Metadata
     if (isAdmin) {
@@ -1135,18 +1127,18 @@ export const cloneTreatment = asyncHandler(async (req, res) => {
     // 🔗 Call Fast API search entity sync asynchronously (Non-blocking)
     axios.post(
         `https://getzynq.io:8000/api/v1/tags/entity/${newTreatmentId}`,
-            {
-                dry_run: false,
-                force: false,
-                type: "treatment"
+        {
+            dry_run: false,
+            force: false,
+            type: "treatment"
+        },
+        {
+            headers: {
+                accept: "application/json",
+                "Content-Type": "application/json"
             },
-            {
-                headers: {
-                    accept: "application/json",
-                    "Content-Type": "application/json"
-                },
-                timeout: 10000 // 10 second timeout
-            }
+            timeout: 10000 // 10 second timeout
+        }
     ).then(() => {
         console.log("✅ Fast API search entity sync completed successfully for cloned treatment:", newTreatmentId);
     }).catch(fastApiErr => {
@@ -1232,9 +1224,8 @@ export const addEditLikeWiseTerms = asyncHandler(async (req, res) => {
 
     delete dbData.language;
 
-    const translatedName = await translateStoredTextPair(dbData.name);
-    dbData.name = translatedName.en;
-    dbData.swedish = translatedName.sv;
+    if (dbData.name) dbData.name = dbData.name.trim();
+    if (dbData.swedish) dbData.swedish = dbData.swedish.trim();
 
     // 🧩 Metadata
     if (isAdmin) {
@@ -1353,9 +1344,8 @@ export const addEditDevice = asyncHandler(async (req, res) => {
 
     delete dbData.language;
 
-    const translatedName = await translateStoredTextPair(dbData.name);
-    dbData.name = translatedName.en;
-    dbData.swedish = translatedName.sv;
+    if (dbData.name) dbData.name = dbData.name.trim();
+    if (dbData.swedish) dbData.swedish = dbData.swedish.trim();
 
     // 🧩 Metadata
     if (isAdmin) {
@@ -1522,12 +1512,10 @@ export const addEditBenefit = asyncHandler(async (req, res) => {
     const isAdmin = role === "ADMIN";
     let dbData = { ...body };
 
-    const inputLanguage = String(dbData.language || language || "en").toLowerCase();
     delete dbData.language;
 
-    const translatedName = await translateStoredTextPair(dbData.name, inputLanguage);
-    dbData.name = translatedName.en;
-    dbData.swedish = translatedName.sv;
+    if (dbData.name) dbData.name = dbData.name.trim();
+    if (dbData.swedish) dbData.swedish = dbData.swedish.trim();
 
     // 🧩 Metadata
     if (isAdmin) {
@@ -1660,7 +1648,7 @@ export const getAllDevices = asyncHandler(async (req, res) => {
 
     // const isAdmin = role === "ADMIN";
 
-        const isAdmin = true;
+    const isAdmin = true;
 
     const data = await getAllDevicesModel(
         isAdmin ? null : user_id,
