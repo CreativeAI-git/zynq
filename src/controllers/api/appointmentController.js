@@ -38,9 +38,9 @@ export const bookAppointment = async (req, res) => {
 
         let { doctor_id, start_time, end_time, type, clinic_id, report_id } = value;
 
-        if (isEmpty(report_id)) {
-            report_id = await getLatestFaceScanReportIDByUserID(req.user.user_id);
-        }
+        // if (isEmpty(report_id)) {
+        //     report_id = await getLatestFaceScanReportIDByUserID(req.user.user_id);
+        // }
 
         // Check before inserting (optional, for nicer UX)
         const existing = await appointmentModel.checkIfSlotAlreadyBooked(doctor_id, start_time);
@@ -384,9 +384,9 @@ export const saveOrBookAppointment = async (req, res) => {
 
         const appointment_id = inputId || uuidv4();
         const total_price = treatments.reduce((sum, t) => sum + t.price, 0);
-        if (isEmpty(report_id)) {
-            report_id = await getLatestFaceScanReportIDByUserID(req.user.user_id);
-        }
+        // if (isEmpty(report_id)) {
+        //     report_id = await getLatestFaceScanReportIDByUserID(req.user.user_id);
+        // }
         const normalizedStart = start_time
             ? dayjs.utc(start_time).format("YYYY-MM-DD HH:mm:ss")
             : null;
@@ -856,9 +856,9 @@ export const saveAppointmentAsDraft = async (req, res) => {
         }
 
         // ---------------- Report ID fix ----------------
-        if (isEmpty(report_id)) {
-            report_id = await getLatestFaceScanReportIDByUserID(user_id);
-        }
+        // if (isEmpty(report_id)) {
+        //     report_id = await getLatestFaceScanReportIDByUserID(user_id);
+        // }
 
         const is_paid = 0;
         const payment_status = "unpaid";
@@ -1789,9 +1789,9 @@ export const bookDirectAppointment = asyncHandler(async (req, res) => {
         const normalizedStart = dayjs.utc(start_time).format("YYYY-MM-DD HH:mm:ss");
         const normalizedEnd = dayjs.utc(end_time).format("YYYY-MM-DD HH:mm:ss");
 
-        if (!report_id) {
-            report_id = await getLatestFaceScanReportIDByUserID(user_id);
-        }
+        // if (!report_id) {
+        //     report_id = await getLatestFaceScanReportIDByUserID(user_id);
+        // }
 
         // ---------------- Load Commission & VAT ----------------
         const [{ APPOINTMENT_COMMISSION }] = await getAdminCommissionRatesModel();
@@ -1868,7 +1868,7 @@ export const bookDirectAppointment = asyncHandler(async (req, res) => {
             start_time: normalizedStart,
             end_time: normalizedEnd,
             is_paid,
-            payment_status: is_paid ? "unpaid" : "paid",
+            payment_status: "paid",
             payment_timing: payment_timing ? payment_timing : "PAY_NOW",
         };
 
