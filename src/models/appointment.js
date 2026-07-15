@@ -44,7 +44,7 @@ export const getAppointmentsByUserId = async (user_id, status, payment_status) =
     LEFT JOIN tbl_clinics c ON c.clinic_id = a.clinic_id
     WHERE a.user_id = ? 
       AND a.save_type = ? 
-      AND a.payment_status != ?
+      AND a.payment_status = ?
     ORDER BY    
     CASE 
     WHEN a.end_time >= NOW() THEN 0   
@@ -918,7 +918,7 @@ export const getRatingsByRole = async (id, role) => {
                 throw new Error('Invalid role for fetching ratings');
         }
 
-  
+
         const query = `
     SELECT 
         ar.appointment_rating_id,
