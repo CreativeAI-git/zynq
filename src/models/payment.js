@@ -801,9 +801,9 @@ export const handlePaymentIntentFailed = async (paymentIntent) => {
 
   user.role = "USER";
 
-  // Mark payment failed
+  // Mark payment failed and cancel appointment status
   const update = await db.query(
-    `UPDATE tbl_appointments SET payment_status = ? WHERE appointment_id = ?`,
+    `UPDATE tbl_appointments SET payment_status = ?, status = 'Cancelled' WHERE appointment_id = ?`,
     ["failed", appointment_id]
   );
   const failureReason =
