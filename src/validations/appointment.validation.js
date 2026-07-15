@@ -30,7 +30,8 @@ export const updateRatingStatusSchema = joi.object({
 
 export const sendReportToChatSchema = joi.object({
   chat_id: stringValidation,
-  report_id: stringValidation
+  // report_id: stringValidation
+  report_id: stringValidation.optional().allow(null, "")
 })
 
 export const contactUsSchema = joi.object({
@@ -53,7 +54,7 @@ export const getGuestFaceScanSchema = joi.object({
 })
 
 export const getDraftAppointmentsSchema = joi.object({
-  doctor_id : stringValidation
+  doctor_id: stringValidation
 })
 
 export const deleteDraftAppointmentSchema = joi.object({
