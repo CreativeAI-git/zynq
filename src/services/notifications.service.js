@@ -510,7 +510,8 @@ export const getUserNotifications = async (userData, language) => {
         const notificationsWithLanguage = enrichedNotifications.map(n => ({
             ...n,
             title: language === 'sv' ? n.title_sv : n.title,
-            body: language === 'sv' ? n.body_sv : n.body
+            body: language === 'sv' ? n.body_sv : n.body,
+            appointment_id: n.type === 'APPOINTMENT' ? n.type_id : null
         }))
 
         return notificationsWithLanguage;
