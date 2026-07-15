@@ -1890,6 +1890,16 @@ export const bookDirectAppointment = asyncHandler(async (req, res) => {
             await appointmentModel.insertAppointmentTreatments(appointment_id, treatments);
         }
 
+        // 💬 Ensure chat room is created immediately when appointment is booked
+        try {
+            const chatCheck = await getChatBetweenUsers(user_id, doctor.zynq_user_id);
+            if (chatCheck.length === 0) {
+                await createChat(user_id, doctor.zynq_user_id);
+            }
+        } catch (chatErr) {
+            console.error("❌ Failed to automatically create chat during booking:", chatErr.message);
+        }
+
         let session = null;
         // ---------------- PAYMENT SECTION (UPDATED) ----------------
 
