@@ -128,23 +128,67 @@ export const get_admin_earning = async () => {
 };
 
 //======================================= User Managment =========================================
-export const get_users_managment = async () => {
+export const get_users_count = async (search) => {
     try {
-        return await db.query(`SELECT
-    tbl_users.*,
-    COUNT(DISTINCT tbl_face_scan_results.face_scan_result_id) AS total_ai_scan_done,
-    COUNT(DISTINCT tbl_appointments.appointment_id) AS total_appointment
-FROM tbl_users
-LEFT JOIN tbl_face_scan_results
-    ON tbl_face_scan_results.user_id = tbl_users.user_id
-LEFT JOIN tbl_appointments
-    ON tbl_appointments.user_id = tbl_users.user_id
-   AND tbl_appointments.payment_status != 'unpaid'
-WHERE tbl_users.is_verified = 1
-  AND tbl_users.is_deleted = 0
-GROUP BY tbl_users.user_id
-ORDER BY tbl_users.created_at DESC;
-`);
+        let whereClause = "WHERE tbl_users.is_verified = 1 AND tbl_users.is_deleted = 0";
+        const params = [];
+
+        if (search) {
+            whereClause += " AND (tbl_users.first_name LIKE ? OR tbl_users.last_name LIKE ? OR tbl_users.email LIKE ? OR tbl_users.mobile_number LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+        }
+
+        const sql = `SELECT COUNT(tbl_users.user_id) AS count FROM tbl_users ${whereClause};`;
+        const result = await db.query(sql, params);
+        return result[0]?.count || 0;
+    } catch (error) {
+        console.error("Database Error in get_users_count:", error.message);
+        throw new Error("Failed to count users.");
+    }
+};
+
+export const get_users_managment = async (limit, offset, search, sortBy, sortOrder) => {
+    try {
+        const allowedSortColumns = {
+            first_name: 'tbl_users.first_name',
+            last_name: 'tbl_users.last_name',
+            email: 'tbl_users.email',
+            mobile_number: 'tbl_users.mobile_number',
+            created_at: 'tbl_users.created_at',
+            total_ai_scan_done: 'total_ai_scan_done',
+            total_appointment: 'total_appointment'
+        };
+        const orderByCol = allowedSortColumns[sortBy] || 'tbl_users.created_at';
+        const orderDir = (sortOrder && sortOrder.toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
+        let whereClause = "WHERE tbl_users.is_verified = 1 AND tbl_users.is_deleted = 0";
+        const params = [];
+
+        if (search) {
+            whereClause += " AND (tbl_users.first_name LIKE ? OR tbl_users.last_name LIKE ? OR tbl_users.email LIKE ? OR tbl_users.mobile_number LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+        }
+
+        const sql = `SELECT
+            tbl_users.*,
+            COUNT(DISTINCT tbl_face_scan_results.face_scan_result_id) AS total_ai_scan_done,
+            COUNT(DISTINCT tbl_appointments.appointment_id) AS total_appointment
+        FROM tbl_users
+        LEFT JOIN tbl_face_scan_results
+            ON tbl_face_scan_results.user_id = tbl_users.user_id
+        LEFT JOIN tbl_appointments
+            ON tbl_appointments.user_id = tbl_users.user_id
+           AND tbl_appointments.payment_status != 'unpaid'
+        ${whereClause}
+        GROUP BY tbl_users.user_id
+        ORDER BY ${orderByCol} ${orderDir}
+        LIMIT ? OFFSET ?;`;
+
+        params.push(limit, offset);
+
+        return await db.query(sql, params);
     } catch (error) {
         console.error("Database Error:", error.message);
         throw new Error("Failed to get user latest data.");
@@ -263,7 +307,7 @@ export const insert_clinic = async (clinic) => {
     }
 };
 
-export const get_clinic_managment = async (limit, offset, search = "", status = "", type = "") => {
+export const get_clinic_managment = async (limit, offset, search = "", status = "", type = "", sortBy = "created_at", sortOrder = "DESC") => {
     try {
         const searchQuery = `%${search}%`;
 
@@ -296,6 +340,17 @@ export const get_clinic_managment = async (limit, offset, search = "", status = 
                 conditions += ` AND zu.role_id = '407595e3-3196-11f0-9e07-0e8e5d906eef'`;
             }
         }
+
+        const allowedSortColumns = {
+            clinic_name: 'c.clinic_name',
+            email: 'c.email',
+            mobile_number: 'c.mobile_number',
+            created_at: 'c.created_at',
+            onboarding_progress: 'c.profile_completion_percentage',
+            profile_status: 'c.profile_status'
+        };
+        const orderByCol = allowedSortColumns[sortBy] || 'c.created_at';
+        const orderDir = (sortOrder && sortOrder.toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
 
         params.push(limit, offset);
 
@@ -336,7 +391,7 @@ export const get_clinic_managment = async (limit, offset, search = "", status = 
 
             WHERE ${conditions}
 
-            ORDER BY c.created_at DESC
+            ORDER BY ${orderByCol} ${orderDir}
             LIMIT ? OFFSET ?
         `;
 
@@ -588,7 +643,7 @@ export const clinicUnsubscribed = async (clinic_id) => {
     }
 };
 
-export const get_doctors_management = async (limit, offset, search = "", type = "", zync_user_id) => {
+export const get_doctors_management = async (limit, offset, search = "", type = "", zync_user_id, sortBy = "created_at", sortOrder = "DESC") => {
     try {
         const searchQuery = `%${search}%`;
 
@@ -619,6 +674,18 @@ export const get_doctors_management = async (limit, offset, search = "", type = 
             conditions += ` AND u.id = ?`;
             params.push(zync_user_id);
         }
+
+        const allowedSortColumns = {
+            name: 'd.name',
+            email: 'u.email',
+            phone: 'd.phone',
+            created_at: 'd.created_at',
+            onboarding_progress: 'd.profile_completion_percentage',
+            profile_status: 'd.profile_status',
+            rating: 'rating'
+        };
+        const orderByCol = allowedSortColumns[sortBy] || 'd.created_at';
+        const orderDir = (sortOrder && sortOrder.toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
 
         params.push(limit, offset);
 
@@ -658,7 +725,7 @@ export const get_doctors_management = async (limit, offset, search = "", type = 
             WHERE ${conditions}
 
             GROUP BY d.doctor_id
-            ORDER BY d.created_at DESC
+            ORDER BY ${orderByCol} ${orderDir}
             LIMIT ? OFFSET ?;
         `;
 
@@ -2278,120 +2345,139 @@ export const updateProductApprovalStatus = async (product_id, approval_status) =
         throw error;
     }
 }
-
-export const getAllTreatmentsModel = async () => {
+export const get_treatments_count = async (search = "") => {
     try {
-        const query = `
+        let whereClause = "is_deleted = 0";
+        const params = [];
+        if (search) {
+            whereClause += " AND (name LIKE ? OR swedish LIKE ? OR description_en LIKE ? OR description_sv LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+        }
+        const sql = `SELECT COUNT(*) AS count FROM tbl_treatments WHERE ${whereClause};`;
+        const result = await db.query(sql, params);
+        return result[0]?.count || 0;
+    } catch (error) {
+        console.error("get_treatments_count error:", error);
+        throw error;
+    }
+};
+
+export const getAllTreatmentsModel = async (limit, offset, search = "", sortBy = "created_at", sortOrder = "DESC") => {
+    try {
+        const allowedSortColumns = {
+            name: 't.name',
+            swedish: 't.swedish',
+            classification_type: 't.classification_type',
+            created_at: 't.created_at',
+            approval_status: 't.approval_status'
+        };
+        const orderByCol = allowedSortColumns[sortBy] || 't.created_at';
+        const orderDir = (sortOrder && sortOrder.toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
+        let whereClause = "t.is_deleted = 0";
+        const params = [];
+
+        if (search) {
+            whereClause += " AND (t.name LIKE ? OR t.swedish LIKE ? OR t.description_en LIKE ? OR t.description_sv LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+        }
+
+        let query = `
             SELECT
-    t.treatment_id,
-    t.name,
-    t.swedish,
-    t.classification_type,
-    t.description_en,
-    t.description_sv,
-    t.technology,
-    t.type,
-    t.source,
-    t.application,
-    t.is_device,
-    t.is_admin_created,
-    t.created_by_zynq_user_id,
-    t.approval_status,
-    t.is_deleted,
-    t.created_at,
-
-    lw.like_wise_terms_ids,
-    lw.like_wise_terms,
-    lw.like_wise_terms_swedish,
-
-    c.concern_ids,
-    c.concern_name,
-    c.concern_name_swedish,
-
-    d.device_name_ids,
-    d.device_name,
-    d.device_name_swedish,
-
-    b.benefits_en_ids,
-    b.benefits_en,
-    b.benefits_sv,
-
-    st.sub_treatment_ids
-
-FROM tbl_treatments t
-
-LEFT JOIN (
-    SELECT
-        tlwt.treatment_id,
-        GROUP_CONCAT(DISTINCT lwt.like_wise_term_id SEPARATOR ',') AS like_wise_terms_ids,
-        GROUP_CONCAT(DISTINCT lwt.name SEPARATOR ',') AS like_wise_terms,
-        GROUP_CONCAT(DISTINCT lwt.swedish SEPARATOR ',') AS like_wise_terms_swedish
-    FROM tbl_treatment_like_wise_terms tlwt
-    JOIN tbl_likewise_terms lwt
-        ON lwt.like_wise_term_id = tlwt.like_wise_term_id
-       AND lwt.is_deleted = 0
-       AND lwt.approval_status = 'APPROVED'
-    GROUP BY tlwt.treatment_id
-) lw ON lw.treatment_id = t.treatment_id
-
-LEFT JOIN (
-    SELECT
-        tc.treatment_id,
-        GROUP_CONCAT(DISTINCT c.concern_id SEPARATOR ',') AS concern_ids,
-        GROUP_CONCAT(DISTINCT c.name SEPARATOR ',') AS concern_name,
-        GROUP_CONCAT(DISTINCT c.swedish SEPARATOR ',') AS concern_name_swedish
-    FROM tbl_treatment_concerns tc
-    JOIN tbl_concerns c
-        ON c.concern_id = tc.concern_id
-       AND c.is_deleted = 0
-       AND c.approval_status = 'APPROVED'
-    GROUP BY tc.treatment_id
-) c ON c.treatment_id = t.treatment_id
-
-LEFT JOIN (
-    SELECT
-        d.treatment_id,
-        GROUP_CONCAT(DISTINCT tbd.device_id SEPARATOR ',') AS device_name_ids,
-        GROUP_CONCAT(DISTINCT tbd.name SEPARATOR ',') AS device_name,
-        GROUP_CONCAT(DISTINCT tbd.swedish SEPARATOR ',') AS device_name_swedish
-    FROM tbl_treatment_devices d
-    JOIN tbl_devices tbd
-        ON tbd.device_id = d.device_id
-       AND tbd.is_deleted = 0
-       AND tbd.approval_status = 'APPROVED'
-    GROUP BY d.treatment_id
-) d ON d.treatment_id = t.treatment_id
-
-LEFT JOIN (
-    SELECT
-        ttb.treatment_id,
-        GROUP_CONCAT(DISTINCT tb.benefit_id SEPARATOR ',') AS benefits_en_ids,
-        GROUP_CONCAT(DISTINCT tb.name SEPARATOR ',') AS benefits_en,
-        GROUP_CONCAT(DISTINCT tb.swedish SEPARATOR ',') AS benefits_sv
-    FROM tbl_treatment_benefits ttb
-    JOIN tbl_benefits tb
-        ON tb.benefit_id = ttb.benefit_id
-       AND tb.is_deleted = 0
-       AND tb.approval_status = 'APPROVED'
-    GROUP BY ttb.treatment_id
-) b ON b.treatment_id = t.treatment_id
-
-LEFT JOIN (
-    SELECT
-        ttstum.treatment_id,
-        GROUP_CONCAT(DISTINCT ttstum.sub_treatment_id SEPARATOR ',') AS sub_treatment_ids
-    FROM tbl_treatment_sub_treatments ttstum
-    GROUP BY ttstum.treatment_id
-) st ON st.treatment_id = t.treatment_id
-
-WHERE
-    t.is_deleted = 0
-ORDER BY
-    t.created_at DESC;
+                t.treatment_id,
+                t.name,
+                t.swedish,
+                t.classification_type,
+                t.description_en,
+                t.description_sv,
+                t.technology,
+                t.type,
+                t.source,
+                t.application,
+                t.is_device,
+                t.is_admin_created,
+                t.created_by_zynq_user_id,
+                t.approval_status,
+                t.is_deleted,
+                t.created_at,
+            
+                lw.like_wise_terms_ids,
+                lw.like_wise_terms,
+                lw.like_wise_terms_swedish,
+            
+                c.concern_ids,
+                c.concern_name,
+                c.concern_name_swedish,
+            
+                d.device_name_ids,
+                d.device_name,
+                d.device_name_swedish,
+            
+                b.benefits_en_ids,
+                b.benefits_en,
+                b.benefits_sv,
+            
+                st.sub_treatment_ids
+            FROM tbl_treatments t
+            LEFT JOIN (
+                SELECT
+                    tlwt.treatment_id,
+                    GROUP_CONCAT(DISTINCT lwt.like_wise_term_id SEPARATOR ',') AS like_wise_terms_ids,
+                    GROUP_CONCAT(DISTINCT lwt.name SEPARATOR ',') AS like_wise_terms,
+                    GROUP_CONCAT(DISTINCT lwt.swedish SEPARATOR ',') AS like_wise_terms_swedish
+                FROM tbl_treatment_like_wise_terms tlwt
+                JOIN tbl_likewise_terms lwt ON lwt.like_wise_term_id = tlwt.like_wise_term_id AND lwt.is_deleted = 0 AND lwt.approval_status = 'APPROVED'
+                GROUP BY tlwt.treatment_id
+            ) lw ON lw.treatment_id = t.treatment_id
+            LEFT JOIN (
+                SELECT
+                    tc.treatment_id,
+                    GROUP_CONCAT(DISTINCT c.concern_id SEPARATOR ',') AS concern_ids,
+                    GROUP_CONCAT(DISTINCT c.name SEPARATOR ',') AS concern_name,
+                    GROUP_CONCAT(DISTINCT c.swedish SEPARATOR ',') AS concern_name_swedish
+                FROM tbl_treatment_concerns tc
+                JOIN tbl_concerns c ON c.concern_id = tc.concern_id AND c.is_deleted = 0 AND c.approval_status = 'APPROVED'
+                GROUP BY tc.treatment_id
+            ) c ON c.treatment_id = t.treatment_id
+            LEFT JOIN (
+                SELECT
+                    d.treatment_id,
+                    GROUP_CONCAT(DISTINCT tbd.device_id SEPARATOR ',') AS device_name_ids,
+                    GROUP_CONCAT(DISTINCT tbd.name SEPARATOR ',') AS device_name,
+                    GROUP_CONCAT(DISTINCT tbd.swedish SEPARATOR ',') AS device_name_swedish
+                FROM tbl_treatment_devices d
+                JOIN tbl_devices tbd ON tbd.device_id = d.device_id AND tbd.is_deleted = 0 AND tbd.approval_status = 'APPROVED'
+                GROUP BY d.treatment_id
+            ) d ON d.treatment_id = t.treatment_id
+            LEFT JOIN (
+                SELECT
+                    ttb.treatment_id,
+                    GROUP_CONCAT(DISTINCT tb.benefit_id SEPARATOR ',') AS benefits_en_ids,
+                    GROUP_CONCAT(DISTINCT tb.name SEPARATOR ',') AS benefits_en,
+                    GROUP_CONCAT(DISTINCT tb.swedish SEPARATOR ',') AS benefits_sv
+                FROM tbl_treatment_benefits ttb
+                JOIN tbl_benefits tb ON tb.benefit_id = ttb.benefit_id AND tb.is_deleted = 0 AND tb.approval_status = 'APPROVED'
+                GROUP BY ttb.treatment_id
+            ) b ON b.treatment_id = t.treatment_id
+            LEFT JOIN (
+                SELECT
+                    ttstum.treatment_id,
+                    GROUP_CONCAT(DISTINCT ttstum.sub_treatment_id SEPARATOR ',') AS sub_treatment_ids
+                FROM tbl_treatment_sub_treatments ttstum
+                GROUP BY ttstum.treatment_id
+            ) st ON st.treatment_id = t.treatment_id
+            WHERE ${whereClause}
+            ORDER BY ${orderByCol} ${orderDir}
         `;
 
-        return await db.query(query);
+        if (limit !== undefined && offset !== undefined) {
+            query += ` LIMIT ? OFFSET ?`;
+            params.push(limit, offset);
+        }
 
+        return await db.query(query, params);
     } catch (error) {
         console.error("getAllTreatmentsModel error:", error);
         throw error;
@@ -3208,15 +3294,75 @@ export const updateConcernModel = async (concern_id, data) => {
     }
 };
 
-export const getAllConcerns = async (lang = "en") => {
+export const get_concerns_count = async (search = "", isAdmin = false, user_id = null) => {
+    try {
+        let conditions = "is_deleted = 0";
+        const params = [];
+
+        if (!isAdmin && user_id) {
+            conditions += " AND (created_by_zynq_user_id = ? OR approval_status = 'APPROVED')";
+            params.push(user_id);
+        } else if (!isAdmin) {
+            conditions += " AND approval_status = 'APPROVED'";
+        }
+
+        if (search) {
+            conditions += " AND (name LIKE ? OR swedish LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern);
+        }
+
+        const sql = `SELECT COUNT(*) AS count FROM tbl_concerns WHERE ${conditions};`;
+        const result = await db.query(sql, params);
+        return result[0]?.count || 0;
+    } catch (error) {
+        console.error("get_concerns_count error:", error);
+        throw error;
+    }
+};
+
+export const getAllConcerns = async (lang = "en", user_id = null, isAdmin = false, limit, offset, search = "", sortBy = "created_at", sortOrder = "DESC") => {
     try {
         let query = `
             SELECT *
             FROM tbl_concerns
-            WHERE is_deleted = 0 AND approval_status = 'APPROVED'
-            ORDER BY created_at desc  
+            WHERE is_deleted = 0
         `;
         const params = [];
+
+        if (!isAdmin && user_id) {
+            query += `
+                AND (
+                    created_by_zynq_user_id = ?
+                    OR approval_status = 'APPROVED'
+                )
+            `;
+            params.push(user_id);
+        } else if (!isAdmin) {
+            query += " AND approval_status = 'APPROVED'";
+        }
+
+        if (search) {
+            query += " AND (name LIKE ? OR swedish LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern);
+        }
+
+        const allowedSortColumns = {
+            name: 'name',
+            swedish: 'swedish',
+            created_at: 'created_at',
+            approval_status: 'approval_status'
+        };
+        const orderByCol = allowedSortColumns[sortBy] || 'created_at';
+        const orderDir = (sortOrder && sortOrder.toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
+        query += ` ORDER BY ${orderByCol} ${orderDir}`;
+
+        if (limit !== undefined && offset !== undefined) {
+            query += ` LIMIT ? OFFSET ?`;
+            params.push(limit, offset);
+        }
 
         const concernData = await db.query(query, params);
 
@@ -3995,7 +4141,10 @@ export const deleteZynqUserDeviceModel = async (device_id, zynq_user_id) => {
 };
 
 // 🔹 Update Approval Status
-export const updateDeviceApprovalStatusModel = async (device_id, approval_status) => {
+export const updateDeviceApprovalStatusModel = async (
+    device_id,
+    approval_status
+) => {
     try {
         // Step 1: Update approval status
         await db.query(
@@ -4026,17 +4175,41 @@ export const updateDeviceApprovalStatusModel = async (device_id, approval_status
     }
 };
 
-export const getAllLikeWiseTermsModel = async (user_id = null, isAdmin = false) => {
+export const get_likewise_terms_count = async (search = "", isAdmin = false, user_id = null) => {
+    try {
+        let conditions = "is_deleted = 0";
+        const params = [];
+
+        if (!isAdmin && user_id) {
+            conditions += " AND (created_by_zynq_user_id = ? OR approval_status = 'APPROVED')";
+            params.push(user_id);
+        }
+
+        if (search) {
+            conditions += " AND (name LIKE ? OR swedish LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern);
+        }
+
+        const sql = `SELECT COUNT(*) AS count FROM tbl_likewise_terms WHERE ${conditions};`;
+        const result = await db.query(sql, params);
+        return result[0]?.count || 0;
+    } catch (error) {
+        console.error("get_likewise_terms_count error:", error);
+        throw error;
+    }
+};
+
+export const getAllLikeWiseTermsModel = async (user_id = null, isAdmin = false, limit, offset, search = "", sortBy = "created_at", sortOrder = "DESC") => {
     try {
         let query = `
             SELECT *
             FROM tbl_likewise_terms
             WHERE is_deleted = 0
         `;
-
         const params = [];
 
-        if (!isAdmin) {
+        if (!isAdmin && user_id) {
             query += `
                 AND (
                     created_by_zynq_user_id = ?
@@ -4046,7 +4219,27 @@ export const getAllLikeWiseTermsModel = async (user_id = null, isAdmin = false) 
             params.push(user_id);
         }
 
-        query += ` ORDER BY created_at DESC`;
+        if (search) {
+            query += " AND (name LIKE ? OR swedish LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern);
+        }
+
+        const allowedSortColumns = {
+            name: 'name',
+            swedish: 'swedish',
+            created_at: 'created_at',
+            approval_status: 'approval_status'
+        };
+        const orderByCol = allowedSortColumns[sortBy] || 'created_at';
+        const orderDir = (sortOrder && sortOrder.toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
+        query += ` ORDER BY ${orderByCol} ${orderDir}`;
+
+        if (limit !== undefined && offset !== undefined) {
+            query += ` LIMIT ? OFFSET ?`;
+            params.push(limit, offset);
+        }
 
         return await db.query(query, params);
     } catch (error) {
@@ -4056,17 +4249,41 @@ export const getAllLikeWiseTermsModel = async (user_id = null, isAdmin = false) 
 };
 
 
-export const getAllDevicesModel = async (user_id = null, isAdmin = false) => {
+export const get_devices_count = async (search = "", isAdmin = false, user_id = null) => {
+    try {
+        let conditions = "is_deleted = 0";
+        const params = [];
+
+        if (!isAdmin && user_id) {
+            conditions += " AND (created_by_zynq_user_id = ? OR approval_status = 'APPROVED')";
+            params.push(user_id);
+        }
+
+        if (search) {
+            conditions += " AND (name LIKE ? OR swedish LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern);
+        }
+
+        const sql = `SELECT COUNT(*) AS count FROM tbl_devices WHERE ${conditions};`;
+        const result = await db.query(sql, params);
+        return result[0]?.count || 0;
+    } catch (error) {
+        console.error("get_devices_count error:", error);
+        throw error;
+    }
+};
+
+export const getAllDevicesModel = async (user_id = null, isAdmin = false, limit, offset, search = "", sortBy = "created_at", sortOrder = "DESC") => {
     try {
         let query = `
             SELECT *
             FROM tbl_devices
             WHERE is_deleted = 0
         `;
-
         const params = [];
 
-        if (!isAdmin) {
+        if (!isAdmin && user_id) {
             query += `
                 AND (
                     created_by_zynq_user_id = ?
@@ -4076,7 +4293,27 @@ export const getAllDevicesModel = async (user_id = null, isAdmin = false) => {
             params.push(user_id);
         }
 
-        query += ` ORDER BY created_at DESC`;
+        if (search) {
+            query += " AND (name LIKE ? OR swedish LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern);
+        }
+
+        const allowedSortColumns = {
+            name: 'name',
+            swedish: 'swedish',
+            created_at: 'created_at',
+            approval_status: 'approval_status'
+        };
+        const orderByCol = allowedSortColumns[sortBy] || 'created_at';
+        const orderDir = (sortOrder && sortOrder.toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
+        query += ` ORDER BY ${orderByCol} ${orderDir}`;
+
+        if (limit !== undefined && offset !== undefined) {
+            query += ` LIMIT ? OFFSET ?`;
+            params.push(limit, offset);
+        }
 
         return await db.query(query, params);
     } catch (error) {
@@ -4085,17 +4322,41 @@ export const getAllDevicesModel = async (user_id = null, isAdmin = false) => {
     }
 };
 
-export const getAllBenefitsModel = async (user_id = null, isAdmin = false) => {
+export const get_benefits_count = async (search = "", isAdmin = false, user_id = null) => {
+    try {
+        let conditions = "is_deleted = 0";
+        const params = [];
+
+        if (!isAdmin && user_id) {
+            conditions += " AND (created_by_zynq_user_id = ? OR approval_status = 'APPROVED')";
+            params.push(user_id);
+        }
+
+        if (search) {
+            conditions += " AND (name LIKE ? OR swedish LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern);
+        }
+
+        const sql = `SELECT COUNT(*) AS count FROM tbl_benefits WHERE ${conditions};`;
+        const result = await db.query(sql, params);
+        return result[0]?.count || 0;
+    } catch (error) {
+        console.error("get_benefits_count error:", error);
+        throw error;
+    }
+};
+
+export const getAllBenefitsModel = async (user_id = null, isAdmin = false, limit, offset, search = "", sortBy = "created_at", sortOrder = "DESC") => {
     try {
         let query = `
             SELECT *
             FROM tbl_benefits
             WHERE is_deleted = 0
         `;
-
         const params = [];
 
-        if (!isAdmin) {
+        if (!isAdmin && user_id) {
             query += `
                 AND (
                     created_by_zynq_user_id = ?
@@ -4105,7 +4366,27 @@ export const getAllBenefitsModel = async (user_id = null, isAdmin = false) => {
             params.push(user_id);
         }
 
-        query += ` ORDER BY created_at DESC`;
+        if (search) {
+            query += " AND (name LIKE ? OR swedish LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern);
+        }
+
+        const allowedSortColumns = {
+            name: 'name',
+            swedish: 'swedish',
+            created_at: 'created_at',
+            approval_status: 'approval_status'
+        };
+        const orderByCol = allowedSortColumns[sortBy] || 'created_at';
+        const orderDir = (sortOrder && sortOrder.toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
+        query += ` ORDER BY ${orderByCol} ${orderDir}`;
+
+        if (limit !== undefined && offset !== undefined) {
+            query += ` LIMIT ? OFFSET ?`;
+            params.push(limit, offset);
+        }
 
         return await db.query(query, params);
     } catch (error) {
@@ -4557,6 +4838,130 @@ export const updateDeviceTagsModel = async (device_id, data) => {
         return await db.query(query, [data, device_id]);
     } catch (error) {
         console.error("updateDeviceTagsModel error:", error);
+        throw error;
+    }
+};
+
+// ======================= Helper Functions for admin panel implementation =======================
+
+export const checkExistingClinicByNameModel = async (clinic_name, exclude_zynq_user_id = null) => {
+    try {
+        const params = [clinic_name];
+        let query = `
+            SELECT clinic_id
+            FROM tbl_clinics
+            WHERE is_deleted = 0
+              AND LOWER(TRIM(clinic_name)) = LOWER(TRIM(?))
+        `;
+        if (exclude_zynq_user_id) {
+            query += " AND zynq_user_id != ?";
+            params.push(exclude_zynq_user_id);
+        }
+        query += " LIMIT 1";
+        const result = await db.query(query, params);
+        return result.length > 0;
+    } catch (error) {
+        console.error("checkExistingClinicByNameModel error:", error);
+        throw error;
+    }
+};
+
+export const checkClinicDependencies = async (clinic_id) => {
+    try {
+        const [doctorsRow] = await db.query(
+            "SELECT COUNT(*) as count FROM tbl_doctor_clinic_map WHERE clinic_id = ? AND is_unsync = 0",
+            [clinic_id]
+        );
+        const [appointmentsRow] = await db.query(
+            "SELECT COUNT(*) as count FROM tbl_appointments WHERE clinic_id = ? AND status = 'Scheduled'",
+            [clinic_id]
+        );
+        return {
+            doctors: doctorsRow?.count || 0,
+            appointments: appointmentsRow?.count || 0
+        };
+    } catch (error) {
+        console.error("checkClinicDependencies error:", error);
+        throw error;
+    }
+};
+
+export const checkTreatmentDependencies = async (treatment_id) => {
+    try {
+        const [clinicsRow] = await db.query(
+            "SELECT COUNT(*) as count FROM tbl_mapped_clinic_treatments WHERE treatment_id = ?",
+            [treatment_id]
+        );
+        const [doctorsRow] = await db.query(
+            "SELECT COUNT(*) as count FROM tbl_doctor_treatments WHERE treatment_id = ?",
+            [treatment_id]
+        );
+        return {
+            clinics: clinicsRow?.count || 0,
+            doctors: doctorsRow?.count || 0
+        };
+    } catch (error) {
+        console.error("checkTreatmentDependencies error:", error);
+        throw error;
+    }
+};
+
+export const checkDeviceDependencies = async (device_id) => {
+    try {
+        const [treatmentsRow] = await db.query(
+            "SELECT COUNT(*) as count FROM tbl_treatment_devices WHERE device_id = ?",
+            [device_id]
+        );
+        return {
+            treatments: treatmentsRow?.count || 0
+        };
+    } catch (error) {
+        console.error("checkDeviceDependencies error:", error);
+        throw error;
+    }
+};
+
+export const checkConcernDependencies = async (concern_id) => {
+    try {
+        const [treatmentsRow] = await db.query(
+            "SELECT COUNT(*) as count FROM tbl_treatment_concerns WHERE concern_id = ?",
+            [concern_id]
+        );
+        return {
+            treatments: treatmentsRow?.count || 0
+        };
+    } catch (error) {
+        console.error("checkConcernDependencies error:", error);
+        throw error;
+    }
+};
+
+export const checkLikeWiseTermDependencies = async (like_wise_term_id) => {
+    try {
+        const [treatmentsRow] = await db.query(
+            "SELECT COUNT(*) as count FROM tbl_treatment_like_wise_terms WHERE like_wise_term_id = ?",
+            [like_wise_term_id]
+        );
+        return {
+            treatments: treatmentsRow?.count || 0
+        };
+    } catch (error) {
+        console.error("checkLikeWiseTermDependencies error:", error);
+        throw error;
+    }
+};
+
+export const checkBenefitDependencies = async (benefit_id) => {
+    try {
+        const [treatmentsRow] = await db.query(
+            "SELECT COUNT(*) as count FROM tbl_treatment_benefits WHERE benefit_id = ?",
+            [benefit_id]
+        );
+        return {
+            treatments: treatmentsRow?.count || 0
+        };
+    } catch (error) {
+        console.error("checkBenefitDependencies error:", error);
         throw error;
     }
 };
