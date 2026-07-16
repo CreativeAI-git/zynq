@@ -119,6 +119,13 @@ export const add_clinic_managment = async (req, res) => {
             const email = ele['Email'];
 
             try {
+                // Check clinic name existence
+                const nameExists = await adminModels.checkExistingClinicByNameModel(ele['Clinic Name']);
+                if (nameExists) {
+                    skippedClinics.push({ email, reason: `Clinic name '${ele['Clinic Name']}' already exists` });
+                    return;
+                }
+
                 // Check email existence
                 const existingUser = await adminModels.findClinicEmail(email);
                 if (existingUser?.length > 0) {
@@ -209,9 +216,11 @@ export const get_clinic_managment = async (req, res) => {
         const search = req.query.search || "";
         const status = req.query.status || "";
         const type = req.query.type || "";
+        const sortBy = req.query.sortBy || "created_at";
+        const sortOrder = req.query.sortOrder || "DESC";
 
         // Fetch filtered clinics
-        const clinics = await adminModels.get_clinic_managment(limit, offset, search, status, type);
+        const clinics = await adminModels.get_clinic_managment(limit, offset, search, status, type, sortBy, sortOrder);
 
         // Total count with filters
         const totalClinics = await adminModels.get_clinics_count(search, status, type);
@@ -334,6 +343,11 @@ export const delete_clinic_management = async (req, res) => {
         if (error) return joiErrorHandle(res, error);
 
         const { clinic_id } = value;
+
+        const dependencies = await adminModels.checkClinicDependencies(clinic_id);
+        if (dependencies.doctors > 0 || dependencies.appointments > 0) {
+            return handleError(res, 400, 'en', `Cannot delete clinic. It has ${dependencies.doctors} active doctor mappings and ${dependencies.appointments} active/upcoming appointments.`);
+        }
 
         const result = await adminModels.delete_clinic_by_id(clinic_id);
 
@@ -707,6 +721,13 @@ export const add_clinic_with_onboarding = async (req, res) => {
         if (!findRole) return handleError(res, 404, 'en', "Role 'CLINIC' not found");
 
         const roleId = findRole.id;
+
+        if (clinic_name) {
+            const nameExists = await adminModels.checkExistingClinicByNameModel(clinic_name);
+            if (nameExists) {
+                return handleError(res, 400, 'en', "Clinic name already exists", { clinic_name });
+            }
+        }
 
         // Check if email already exists
         const existingUser = await adminModels.findClinicEmail(email);
@@ -1225,6 +1246,13 @@ export const updateClinicController = async (req, res) => {
             same_for_all,
             slot_time
         } = value;
+
+        if (clinic_name) {
+            const nameExists = await adminModels.checkExistingClinicByNameModel(clinic_name, zynq_user_id);
+            if (nameExists) {
+                return handleError(res, 400, 'en', "Clinic name already exists", { clinic_name });
+            }
+        }
 
         const uploadedFiles = req.files;
 

@@ -6,7 +6,15 @@ import { isEmpty } from "../../utils/user_helper.js";
 
 export const get_users_managment = async (req, res) => {
     try {
-        const users = await adminModels.get_users_managment();
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+        const search = req.query.search || "";
+        const sortBy = req.query.sortBy || "created_at";
+        const sortOrder = req.query.sortOrder || "DESC";
+
+        const totalRecords = await adminModels.get_users_count(search);
+        const users = await adminModels.get_users_managment(limit, offset, search, sortBy, sortOrder);
         const faceScanResults = await adminModels.get_all_face_scan_results();
 
         if (users && users.length > 0) {
@@ -25,9 +33,19 @@ export const get_users_managment = async (req, res) => {
             }));
 
 
-            return handleSuccess(res, 200, 'en', "Fetch user management successfully", { users: formattedUsers });
+            return handleSuccess(res, 200, 'en', "Fetch user management successfully", {
+                users: formattedUsers,
+                totalRecords,
+                totalPages: Math.ceil(totalRecords / limit),
+                currentPage: page
+            });
         } else {
-            return handleSuccess(res, 200, 'en', "No users found", { users: [] });
+            return handleSuccess(res, 200, 'en', "No users found", {
+                users: [],
+                totalRecords,
+                totalPages: 0,
+                currentPage: page
+            });
         }
     } catch (error) {
         console.error("Internal Server Error:", error);

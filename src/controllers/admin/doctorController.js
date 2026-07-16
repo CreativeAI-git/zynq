@@ -34,6 +34,8 @@ export const get_doctors_management = async (req, res) => {
         const search = req.query.search || "";
         const type = req.query.type || "";
         let zync_user_id = req.query.zync_user_id || null;
+        const sortBy = req.query.sortBy || "created_at";
+        const sortOrder = req.query.sortOrder || "DESC";
 
         // 1. Total doctor count
         const totalRecords = await adminModels.get_doctors_count(search, type);
@@ -44,7 +46,9 @@ export const get_doctors_management = async (req, res) => {
             offset,
             search,
             type,
-            zync_user_id
+            zync_user_id,
+            sortBy,
+            sortOrder
         );
 
         if (!doctors || doctors.length === 0) {

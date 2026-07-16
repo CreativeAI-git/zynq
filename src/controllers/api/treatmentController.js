@@ -80,7 +80,17 @@ import {
     getAllDeviceSearchTagsModel,
     checkTagsExistForDeviceModel,
     addDeviceTagsModel,
-    updateDeviceTagsModel
+    updateDeviceTagsModel,
+    get_treatments_count,
+    get_likewise_terms_count,
+    get_devices_count,
+    get_benefits_count,
+    get_concerns_count,
+    checkTreatmentDependencies,
+    checkDeviceDependencies,
+    checkConcernDependencies,
+    checkLikeWiseTermDependencies,
+    checkBenefitDependencies
 } from "../../models/admin.js";
 import { getTreatmentsByConcernId } from "../../models/api.js";
 import axios from "axios";
@@ -540,6 +550,13 @@ export const deleteTreatment = asyncHandler(async (req, res) => {
 
     const language = req.user?.language || 'en';
 
+    const deps = await checkTreatmentDependencies(treatment_id);
+    if (deps.clinics > 0 || deps.doctors > 0) {
+        return handleError(res, 400, language, "CANNOT_DELETE_TREATMENT_ACTIVE_DEPENDENCIES", {
+            reason: `Cannot delete treatment. It is mapped to ${deps.clinics} clinic(s) and ${deps.doctors} doctor(s).`
+        });
+    }
+
     if (role === "ADMIN") {
         await deleteTreatmentModel(treatment_id)
     } else {
@@ -592,6 +609,18 @@ export const updateTreatmentApprovalStatus = asyncHandler(async (req, res) => {
     const { approval_status, treatment_id } = req.body;
     const { language = "en" } = req.user;
 
+    if (approval_status === "APPROVED") {
+        const treatment = await getTreatmentByIdModel(treatment_id);
+        if (!treatment) {
+            return handleError(res, 444, language, "TREATMENT_NOT_FOUND");
+        }
+        if (!treatment.name || !treatment.swedish || !treatment.description_en || !treatment.description_sv) {
+            return handleError(res, 400, language, "TRANSLATIONS_INCOMPLETE", {
+                reason: "Cannot approve treatment. English and Swedish names and descriptions must be populated."
+            });
+        }
+    }
+
     const statusMessages = {
         APPROVED: "TREATMENT_APPROVED_SUCCESSFULLY",
         REJECTED: "TREATMENT_REJECTED_SUCCESSFULLY",
@@ -626,9 +655,40 @@ export const updateTreatmentApprovalStatus = asyncHandler(async (req, res) => {
 export const get_all_concerns = async (req, res) => {
     try {
         const language = req?.user?.language || 'en';
-        const concerns = await getAllConcerns(language);
+        const role = req?.user?.role;
+        const user_id = req?.user?.id;
+        const isAdmin = role === "ADMIN";
 
-        return handleSuccess(res, 200, "en", "CONCERNS_FETCHED", applyLanguageOverwrite(concerns, language));
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+        const search = req.query.search || "";
+        const sortBy = req.query.sortBy || "created_at";
+        const sortOrder = req.query.sortOrder || "DESC";
+
+        let concerns = [];
+        let total = 0;
+
+        if (req.query.page !== undefined) {
+            total = await get_concerns_count(search, isAdmin, user_id);
+            concerns = await getAllConcerns(language, user_id, isAdmin, limit, offset, search, sortBy, sortOrder);
+        } else {
+            concerns = await getAllConcerns(language, user_id, isAdmin);
+        }
+
+        const data = applyLanguageOverwrite(concerns, language);
+
+        if (req.query.page !== undefined) {
+            return handleSuccess(res, 200, "en", "CONCERNS_FETCHED", {
+                concerns: data,
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            });
+        }
+
+        return handleSuccess(res, 200, "en", "CONCERNS_FETCHED", data);
     } catch (error) {
         console.error("Error fetching indications:", error);
         return handleError(res, 500, "en", "INTERNAL_SERVER_ERROR");
@@ -642,11 +702,24 @@ export const getAllTreatments = asyncHandler(async (req, res) => {
 
     const isAdmin = role === "ADMIN";
 
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+    const search = req.query.search || "";
+    const sortBy = req.query.sortBy || "created_at";
+    const sortOrder = req.query.sortOrder || "DESC";
+
     let treatments = [];
+    let total = 0;
     if (!isAdmin) {
         treatments = await getTreatmentsByZynqUserId(zynq_user_id);
     } else {
-        treatments = await getAllTreatmentsModel();
+        if (req.query.page !== undefined) {
+            total = await get_treatments_count(search);
+            treatments = await getAllTreatmentsModel(limit, offset, search, sortBy, sortOrder);
+        } else {
+            treatments = await getAllTreatmentsModel();
+        }
     }
 
     // Fetch and map search tags
@@ -697,6 +770,13 @@ export const getAllTreatments = asyncHandler(async (req, res) => {
         APPROVED: approved,
         OTHERS: others
     };
+
+    if (isAdmin && req.query.page !== undefined) {
+        response.total = total;
+        response.page = page;
+        response.limit = limit;
+        response.totalPages = Math.ceil(total / limit);
+    }
 
     if (isAdmin) {
         return handleSuccess(res, 200, language, "TREATMENTS_FETCHED", response);
@@ -866,6 +946,13 @@ export const deleteConcern = asyncHandler(async (req, res) => {
 
     const language = req.user?.language || 'en';
 
+    const deps = await checkConcernDependencies(concern_id);
+    if (deps.treatments > 0) {
+        return handleError(res, 400, language, "CANNOT_DELETE_CONCERN_ACTIVE_DEPENDENCIES", {
+            reason: `Cannot delete concern. It is mapped to ${deps.treatments} treatment(s).`
+        });
+    }
+
     if (role === "ADMIN") {
         await deleteConcernModel(concern_id)
     } else {
@@ -881,6 +968,18 @@ export const deleteConcern = asyncHandler(async (req, res) => {
 export const updateConcernApprovalStatus = asyncHandler(async (req, res) => {
     const { approval_status, concern_id } = req.body;
     const { language = "en" } = req.user;
+
+    if (approval_status === "APPROVED") {
+        const [concern] = await getConcernsByIdsModel([concern_id]);
+        if (!concern) {
+            return handleError(res, 444, language, "CONCERN_NOT_FOUND");
+        }
+        if (!concern.name || !concern.swedish) {
+            return handleError(res, 400, language, "TRANSLATIONS_INCOMPLETE", {
+                reason: "Cannot approve concern. English and Swedish names must be populated."
+            });
+        }
+    }
 
     // 🧩 Map messages dynamically based on status
     const statusMessages = {
@@ -1280,6 +1379,13 @@ export const deleteLikeWiseTerms = asyncHandler(async (req, res) => {
 
     const language = req.user?.language || 'en';
 
+    const deps = await checkLikeWiseTermDependencies(like_wise_term_id);
+    if (deps.treatments > 0) {
+        return handleError(res, 400, language, "CANNOT_DELETE_LIKEWISETERM_ACTIVE_DEPENDENCIES", {
+            reason: `Cannot delete likewise term. It is mapped to ${deps.treatments} treatment(s).`
+        });
+    }
+
     if (role === "ADMIN") {
         await deleteLikeWiseTermsModel(like_wise_term_id)
     } else {
@@ -1295,6 +1401,18 @@ export const deleteLikeWiseTerms = asyncHandler(async (req, res) => {
 export const updateLikeWiseTermsApprovalStatus = asyncHandler(async (req, res) => {
     const { approval_status, like_wise_term_id } = req.body;
     const { language = "en" } = req.user;
+
+    if (approval_status === "APPROVED") {
+        const [likeWise] = await getLikeWiseTermsByIdsModel([like_wise_term_id]);
+        if (!likeWise) {
+            return handleError(res, 444, language, "LIKEWISE_NOT_FOUND");
+        }
+        if (!likeWise.name || !likeWise.swedish) {
+            return handleError(res, 400, language, "TRANSLATIONS_INCOMPLETE", {
+                reason: "Cannot approve likewise term. English and Swedish names must be populated."
+            });
+        }
+    }
 
     // 🧩 Map messages dynamically based on status
     const statusMessages = {
@@ -1454,6 +1572,13 @@ export const deleteDevice = asyncHandler(async (req, res) => {
     const user_id = req.user?.id;
     const language = req.user?.language || "en";
 
+    const deps = await checkDeviceDependencies(device_id);
+    if (deps.treatments > 0) {
+        return handleError(res, 400, language, "CANNOT_DELETE_DEVICE_ACTIVE_DEPENDENCIES", {
+            reason: `Cannot delete device. It is mapped to ${deps.treatments} treatment(s).`
+        });
+    }
+
     if (role === "ADMIN") {
         await deleteDeviceModel(device_id);
     } else {
@@ -1469,6 +1594,18 @@ export const deleteDevice = asyncHandler(async (req, res) => {
 export const updateDeviceApprovalStatus = asyncHandler(async (req, res) => {
     const { approval_status, device_id } = req.body;
     const { language = "en" } = req.user;
+
+    if (approval_status === "APPROVED") {
+        const [device] = await getDevicesByIdsModel([device_id]);
+        if (!device) {
+            return handleError(res, 444, language, "DEVICE_NOT_FOUND");
+        }
+        if (!device.name || !device.swedish) {
+            return handleError(res, 400, language, "TRANSLATIONS_INCOMPLETE", {
+                reason: "Cannot approve device. English and Swedish names must be populated."
+            });
+        }
+    }
 
     const statusMessages = {
         APPROVED: "DEVICE_APPROVED_SUCCESSFULLY",
@@ -1569,6 +1706,13 @@ export const deleteBenefit = asyncHandler(async (req, res) => {
     const user_id = req.user?.id;
     const language = req.user?.language || "en";
 
+    const deps = await checkBenefitDependencies(benefit_id);
+    if (deps.treatments > 0) {
+        return handleError(res, 400, language, "CANNOT_DELETE_BENEFIT_ACTIVE_DEPENDENCIES", {
+            reason: `Cannot delete benefit. It is mapped to ${deps.treatments} treatment(s).`
+        });
+    }
+
     if (role === "ADMIN") {
         await deleteBenefitModel(benefit_id);
     } else {
@@ -1584,6 +1728,18 @@ export const deleteBenefit = asyncHandler(async (req, res) => {
 export const updateBenefitApprovalStatus = asyncHandler(async (req, res) => {
     const { approval_status, benefit_id } = req.body;
     const { language = "en" } = req.user;
+
+    if (approval_status === "APPROVED") {
+        const [benefit] = await getBenefitsByIdsModel([benefit_id]);
+        if (!benefit) {
+            return handleError(res, 444, language, "BENEFIT_NOT_FOUND");
+        }
+        if (!benefit.name || !benefit.swedish) {
+            return handleError(res, 400, language, "TRANSLATIONS_INCOMPLETE", {
+                reason: "Cannot approve benefit. English and Swedish names must be populated."
+            });
+        }
+    }
 
     const statusMessages = {
         APPROVED: "BENEFIT_APPROVED_SUCCESSFULLY",
@@ -1622,15 +1778,45 @@ export const getAllLikeWiseTerms = asyncHandler(async (req, res) => {
     const role = req.user?.role;
     const user_id = req.user?.id;
     const language = req.user?.language || "en";
+    const isAdmin = role === "ADMIN";
 
-    // const isAdmin = role === "ADMIN";
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+    const search = req.query.search || "";
+    const sortBy = req.query.sortBy || "created_at";
+    const sortOrder = req.query.sortOrder || "DESC";
 
-    const isAdmin = true;
+    let data = [];
+    let total = 0;
 
-    const data = await getAllLikeWiseTermsModel(
-        isAdmin ? null : user_id,
-        isAdmin
-    );
+    if (req.query.page !== undefined) {
+        total = await get_likewise_terms_count(search, isAdmin, isAdmin ? null : user_id);
+        data = await getAllLikeWiseTermsModel(
+            isAdmin ? null : user_id,
+            isAdmin,
+            limit,
+            offset,
+            search,
+            sortBy,
+            sortOrder
+        );
+    } else {
+        data = await getAllLikeWiseTermsModel(
+            isAdmin ? null : user_id,
+            isAdmin
+        );
+    }
+
+    if (req.query.page !== undefined) {
+        return handleSuccess(res, 200, language, "LIKEWISETERM_FETCHED_SUCCESSFULLY", {
+            likewiseTerms: data,
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit)
+        });
+    }
 
     return handleSuccess(
         res,
@@ -1645,15 +1831,35 @@ export const getAllDevices = asyncHandler(async (req, res) => {
     const role = req.user?.role;
     const user_id = req.user?.id;
     const language = req.user?.language || "en";
+    const isAdmin = role === "ADMIN";
 
-    // const isAdmin = role === "ADMIN";
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+    const search = req.query.search || "";
+    const sortBy = req.query.sortBy || "created_at";
+    const sortOrder = req.query.sortOrder || "DESC";
 
-    const isAdmin = true;
+    let data = [];
+    let total = 0;
 
-    const data = await getAllDevicesModel(
-        isAdmin ? null : user_id,
-        isAdmin
-    );
+    if (req.query.page !== undefined) {
+        total = await get_devices_count(search, isAdmin, isAdmin ? null : user_id);
+        data = await getAllDevicesModel(
+            isAdmin ? null : user_id,
+            isAdmin,
+            limit,
+            offset,
+            search,
+            sortBy,
+            sortOrder
+        );
+    } else {
+        data = await getAllDevicesModel(
+            isAdmin ? null : user_id,
+            isAdmin
+        );
+    }
 
     // Fetch and map search tags for devices
     const searchTagsList = await getAllDeviceSearchTagsModel();
@@ -1687,6 +1893,16 @@ export const getAllDevices = asyncHandler(async (req, res) => {
         }
     }
 
+    if (req.query.page !== undefined) {
+        return handleSuccess(res, 200, language, "DEVICE_FETCHED_SUCCESSFULLY", {
+            devices: data,
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit)
+        });
+    }
+
     return handleSuccess(
         res,
         200,
@@ -1700,15 +1916,45 @@ export const getAllBenefits = asyncHandler(async (req, res) => {
     const role = req.user?.role;
     const user_id = req.user?.id;
     const language = req.user?.language || "en";
+    const isAdmin = role === "ADMIN";
 
-    // const isAdmin = role === "ADMIN";
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+    const search = req.query.search || "";
+    const sortBy = req.query.sortBy || "created_at";
+    const sortOrder = req.query.sortOrder || "DESC";
 
-    const isAdmin = true;
+    let data = [];
+    let total = 0;
 
-    const data = await getAllBenefitsModel(
-        isAdmin ? null : user_id,
-        isAdmin
-    );
+    if (req.query.page !== undefined) {
+        total = await get_benefits_count(search, isAdmin, isAdmin ? null : user_id);
+        data = await getAllBenefitsModel(
+            isAdmin ? null : user_id,
+            isAdmin,
+            limit,
+            offset,
+            search,
+            sortBy,
+            sortOrder
+        );
+    } else {
+        data = await getAllBenefitsModel(
+            isAdmin ? null : user_id,
+            isAdmin
+        );
+    }
+
+    if (req.query.page !== undefined) {
+        return handleSuccess(res, 200, language, "BENEFIT_FETCHED_SUCCESSFULLY", {
+            benefits: data,
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit)
+        });
+    }
 
     return handleSuccess(
         res,
