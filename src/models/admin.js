@@ -5153,3 +5153,21 @@ export const checkBenefitDependencies = async (benefit_id) => {
         throw error;
     }
 };
+
+export const checkSubTreatmentMasterDependencies = async (sub_treatment_id) => {
+    try {
+        const [treatmentsRow] = await db.query(
+            `SELECT COUNT(*) as count 
+             FROM tbl_treatment_sub_treatments ttst
+             JOIN tbl_treatments t ON ttst.treatment_id = t.treatment_id
+             WHERE ttst.sub_treatment_id = ? AND t.is_deleted = 0`,
+            [sub_treatment_id]
+        );
+        return {
+            treatments: treatmentsRow?.count || 0
+        };
+    } catch (error) {
+        console.error("checkSubTreatmentMasterDependencies error:", error);
+        throw error;
+    }
+};

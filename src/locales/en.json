@@ -364,5 +364,6 @@
   "CANNOT_DELETE_CONCERN_ACTIVE_DEPENDENCIES": "Cannot delete concern because it is mapped to active treatments or users.",
   "CANNOT_DELETE_LIKEWISETERM_ACTIVE_DEPENDENCIES": "Cannot delete likewise term because it is mapped to active treatments.",
   "CANNOT_DELETE_DEVICE_ACTIVE_DEPENDENCIES": "Cannot delete device because it is mapped to active treatments.",
-  "CANNOT_DELETE_BENEFIT_ACTIVE_DEPENDENCIES": "Cannot delete benefit because it is mapped to active treatments."
+  "CANNOT_DELETE_BENEFIT_ACTIVE_DEPENDENCIES": "Cannot delete benefit because it is mapped to active treatments.",
+  "CANNOT_DELETE_SUBTREATMENT_ACTIVE_DEPENDENCIES": "Cannot delete subservice because it is connected to active treatments."
 }
