@@ -128,7 +128,7 @@ export const get_admin_earning = async () => {
 };
 
 //======================================= User Managment =========================================
-export const get_users_count = async (search) => {
+export const get_users_count = async (search, status, startDate, endDate) => {
     try {
         let whereClause = "WHERE tbl_users.is_verified = 1 AND tbl_users.is_deleted = 0";
         const params = [];
@@ -137,6 +137,21 @@ export const get_users_count = async (search) => {
             whereClause += " AND (tbl_users.full_name LIKE ? OR tbl_users.email LIKE ? OR tbl_users.mobile_number LIKE ?)";
             const searchPattern = `%${search}%`;
             params.push(searchPattern, searchPattern, searchPattern);
+        }
+
+        if (status) {
+            whereClause += " AND tbl_users.approval_status = ?";
+            params.push(status);
+        }
+
+        if (startDate) {
+            whereClause += " AND tbl_users.created_at >= ?";
+            params.push(`${startDate} 00:00:00`);
+        }
+
+        if (endDate) {
+            whereClause += " AND tbl_users.created_at <= ?";
+            params.push(`${endDate} 23:59:59`);
         }
 
         const sql = `SELECT COUNT(tbl_users.user_id) AS count FROM tbl_users ${whereClause};`;
@@ -148,7 +163,7 @@ export const get_users_count = async (search) => {
     }
 };
 
-export const get_users_managment = async (limit, offset, search, sortBy, sortOrder) => {
+export const get_users_managment = async (limit, offset, search, sortBy, sortOrder, status, startDate, endDate) => {
     try {
         const allowedSortColumns = {
             full_name: 'tbl_users.full_name',
@@ -168,6 +183,21 @@ export const get_users_managment = async (limit, offset, search, sortBy, sortOrd
             whereClause += " AND (tbl_users.full_name LIKE ? OR tbl_users.email LIKE ? OR tbl_users.mobile_number LIKE ?)";
             const searchPattern = `%${search}%`;
             params.push(searchPattern, searchPattern, searchPattern);
+        }
+
+        if (status) {
+            whereClause += " AND tbl_users.approval_status = ?";
+            params.push(status);
+        }
+
+        if (startDate) {
+            whereClause += " AND tbl_users.created_at >= ?";
+            params.push(`${startDate} 00:00:00`);
+        }
+
+        if (endDate) {
+            whereClause += " AND tbl_users.created_at <= ?";
+            params.push(`${endDate} 23:59:59`);
         }
 
         const sql = `SELECT
