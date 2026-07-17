@@ -359,5 +359,10 @@
   "BENEFIT_DELETED_SUCCESSFULLY": "Benefit Deleted Successfully",
   "NOT_AUTHORIZED_TO_DELETE_BENEFIT": "You are not authorized to delete this benefit",
   "BENEFIT_APPROVED_SUCCESSFULLY": "Benefit Approved Successfully",
-  "BENEFIT_REJECTED_SUCCESSFULLY": "Benefit Rejected Successfully"
+  "BENEFIT_REJECTED_SUCCESSFULLY": "Benefit Rejected Successfully",
+  "CANNOT_DELETE_TREATMENT_ACTIVE_DEPENDENCIES": "Cannot delete treatment because it is mapped to active clinics, doctors, concerns, benefits, or devices.",
+  "CANNOT_DELETE_CONCERN_ACTIVE_DEPENDENCIES": "Cannot delete concern because it is mapped to active treatments or users.",
+  "CANNOT_DELETE_LIKEWISETERM_ACTIVE_DEPENDENCIES": "Cannot delete likewise term because it is mapped to active treatments.",
+  "CANNOT_DELETE_DEVICE_ACTIVE_DEPENDENCIES": "Cannot delete device because it is mapped to active treatments.",
+  "CANNOT_DELETE_BENEFIT_ACTIVE_DEPENDENCIES": "Cannot delete benefit because it is mapped to active treatments."
 }

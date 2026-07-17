@@ -358,5 +358,10 @@
   "BENEFIT_DELETED_SUCCESSFULLY": "Förmånen har tagits bort",
   "NOT_AUTHORIZED_TO_DELETE_BENEFIT": "Du har inte behörighet att ta bort denna förmån",
   "BENEFIT_APPROVED_SUCCESSFULLY": "Förmånen har godkänts",
-  "BENEFIT_REJECTED_SUCCESSFULLY": "Förmånen har avvisats"
+  "BENEFIT_REJECTED_SUCCESSFULLY": "Förmånen har avvisats",
+  "CANNOT_DELETE_TREATMENT_ACTIVE_DEPENDENCIES": "Kan inte radera behandlingen eftersom den är kopplad till aktiva kliniker, läkare, besvär, fördelar eller enheter.",
+  "CANNOT_DELETE_CONCERN_ACTIVE_DEPENDENCIES": "Kan inte radera besväret eftersom det är kopplat till aktiva behandlingar eller användare.",
+  "CANNOT_DELETE_LIKEWISETERM_ACTIVE_DEPENDENCIES": "Kan inte radera relaterad term eftersom den är kopplad till aktiva behandlingar.",
+  "CANNOT_DELETE_DEVICE_ACTIVE_DEPENDENCIES": "Kan inte radera enheten eftersom den är kopplad till aktiva behandlingar.",
+  "CANNOT_DELETE_BENEFIT_ACTIVE_DEPENDENCIES": "Kan inte radera fördelen eftersom den är kopplad till aktiva behandlingar."
 }
