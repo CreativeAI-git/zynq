@@ -12,9 +12,12 @@ export const get_users_managment = async (req, res) => {
         const search = req.query.search || "";
         const sortBy = req.query.sortBy || "created_at";
         const sortOrder = req.query.sortOrder || "DESC";
+        const status = req.query.status || "";
+        const startDate = req.query.startDate || "";
+        const endDate = req.query.endDate || "";
 
-        const totalRecords = await adminModels.get_users_count(search);
-        const users = await adminModels.get_users_managment(limit, offset, search, sortBy, sortOrder);
+        const totalRecords = await adminModels.get_users_count(search, status, startDate, endDate);
+        const users = await adminModels.get_users_managment(limit, offset, search, sortBy, sortOrder, status, startDate, endDate);
         const faceScanResults = await adminModels.get_all_face_scan_results();
 
         if (users && users.length > 0) {
