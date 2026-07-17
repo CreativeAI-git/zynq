@@ -2175,10 +2175,33 @@ export const getClinicInvitationListController = async (req, res) => {
     try {
         const language = req?.user?.language || 'en';
 
-        // Fetch filtered clinics
-        const doctors = await adminModels.getClinicInvitaionListModel();
+        const page = parseInt(req.query.page) || 1;
+        const limit = req.query.limit ? parseInt(req.query.limit) : null;
+        const offset = limit ? (page - 1) * limit : 0;
+        const search = req.query.search || "";
+        const status = req.query.status || "";
+        const type = req.query.type || "";
+        const sortBy = req.query.sortBy || "created_at";
+        const sortOrder = req.query.sortOrder || "DESC";
 
-        return handleSuccess(res, 200, language, "Fetch Clinic Invitation List Successfully", doctors);
+        const [doctors, total] = await Promise.all([
+            adminModels.getClinicInvitaionListModel({ limit, offset, search, status, type, sortBy, sortOrder }),
+            adminModels.get_clinic_invitation_count({ search, status, type })
+        ]);
+
+        if (!req.query.limit && !req.query.page) {
+            return handleSuccess(res, 200, language, "Fetch Clinic Invitation List Successfully", doctors);
+        }
+
+        const response = {
+            clinics: doctors,
+            total,
+            page,
+            limit: limit || total,
+            totalPages: limit ? Math.ceil(total / limit) : 1
+        };
+
+        return handleSuccess(res, 200, language, "Fetch Clinic Invitation List Successfully", response);
 
     } catch (error) {
         console.error("internal E", error);

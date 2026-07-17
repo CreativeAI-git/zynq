@@ -171,7 +171,27 @@ export const get_users_managment = async (limit, offset, search, sortBy, sortOrd
         }
 
         const sql = `SELECT
-            tbl_users.*,
+            tbl_users.user_id,
+            tbl_users.email,
+            tbl_users.full_name,
+            tbl_users.approval_status,
+            tbl_users.age,
+            tbl_users.gender,
+            tbl_users.mobile_number,
+            tbl_users.profile_image,
+            tbl_users.language,
+            tbl_users.is_verified,
+            tbl_users.is_active,
+            tbl_users.is_deleted,
+            tbl_users.is_push_notification_on,
+            tbl_users.is_location_on,
+            tbl_users.created_at,
+            tbl_users.updated_at,
+            tbl_users.latitude,
+            tbl_users.longitude,
+            tbl_users.udid,
+            tbl_users.isOnline,
+            tbl_users.stripe_customer_id,
             COUNT(DISTINCT tbl_face_scan_results.face_scan_result_id) AS total_ai_scan_done,
             COUNT(DISTINCT tbl_appointments.appointment_id) AS total_appointment
         FROM tbl_users
@@ -3705,10 +3725,95 @@ export const checkDoctorIdsInvitaionListModel = async (ids) => {
     }
 };
 
-export const getClinicInvitaionListModel = async () => {
+export const get_clinic_invitation_count = async ({ search = "", status = "", type = "" }) => {
     try {
+        const params = [];
+        let conditions = `
+            c.is_deleted = 0
+            AND zu.role_id IN (
+                '2fc0b43c-3196-11f0-9e07-0e8e5d906eef',
+                '407595e3-3196-11f0-9e07-0e8e5d906eef'
+            )
+        `;
+
+        if (status) {
+            conditions += " AND c.profile_status = ?";
+            params.push(status);
+        } else {
+            conditions += " AND c.profile_status IN ('IMPORTED', 'INVITED')";
+        }
+
+        if (type) {
+            if (type === "Clinic") {
+                conditions += " AND zu.role_id = '2fc0b43c-3196-11f0-9e07-0e8e5d906eef'";
+            } else if (type === "Solo Doctor") {
+                conditions += " AND zu.role_id = '407595e3-3196-11f0-9e07-0e8e5d906eef'";
+            }
+        }
+
+        if (search) {
+            conditions += " AND (c.clinic_name LIKE ? OR c.email LIKE ? OR c.mobile_number LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern, searchPattern);
+        }
 
         const sql = `
+            SELECT COUNT(*) AS count
+            FROM tbl_clinics c
+            LEFT JOIN tbl_zqnq_users zu ON zu.id = c.zynq_user_id
+            WHERE ${conditions};
+        `;
+        const result = await db.query(sql, params);
+        return result[0]?.count || 0;
+    } catch (error) {
+        console.error("get_clinic_invitation_count error:", error);
+        throw error;
+    }
+};
+
+export const getClinicInvitaionListModel = async ({ limit, offset, search = "", status = "", type = "", sortBy = "created_at", sortOrder = "DESC" } = {}) => {
+    try {
+        const params = [];
+        let conditions = `
+            c.is_deleted = 0
+            AND zu.role_id IN (
+                '2fc0b43c-3196-11f0-9e07-0e8e5d906eef',
+                '407595e3-3196-11f0-9e07-0e8e5d906eef'
+            )
+        `;
+
+        if (status) {
+            conditions += " AND c.profile_status = ?";
+            params.push(status);
+        } else {
+            conditions += " AND c.profile_status IN ('IMPORTED', 'INVITED')";
+        }
+
+        if (type) {
+            if (type === "Clinic") {
+                conditions += " AND zu.role_id = '2fc0b43c-3196-11f0-9e07-0e8e5d906eef'";
+            } else if (type === "Solo Doctor") {
+                conditions += " AND zu.role_id = '407595e3-3196-11f0-9e07-0e8e5d906eef'";
+            }
+        }
+
+        if (search) {
+            conditions += " AND (c.clinic_name LIKE ? OR c.email LIKE ? OR c.mobile_number LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern, searchPattern);
+        }
+
+        const allowedSortColumns = {
+            clinic_name: 'c.clinic_name',
+            email: 'c.email',
+            mobile_number: 'c.mobile_number',
+            created_at: 'c.created_at',
+            profile_status: 'c.profile_status'
+        };
+        const orderByCol = allowedSortColumns[sortBy] || 'c.created_at';
+        const orderDir = (sortOrder && sortOrder.toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
+        let query = `
             SELECT 
                 c.zynq_user_id,
                 c.clinic_id, 
@@ -3717,32 +3822,26 @@ export const getClinicInvitaionListModel = async () => {
                 c.mobile_number, 
                 c.address, 
                 c.profile_status,
-
                 CASE 
                     WHEN zu.role_id = '2fc0b43c-3196-11f0-9e07-0e8e5d906eef' THEN 'Clinic'
                     WHEN zu.role_id = '407595e3-3196-11f0-9e07-0e8e5d906eef' THEN 'Solo Doctor'
                 END AS user_type
-
             FROM tbl_clinics c
-            LEFT JOIN tbl_clinic_locations cl 
-                ON cl.clinic_id = c.clinic_id
-            LEFT JOIN tbl_zqnq_users zu 
-                ON zu.id = c.zynq_user_id
-
-            WHERE c.is_deleted = 0
-            AND zu.role_id IN (
-                '2fc0b43c-3196-11f0-9e07-0e8e5d906eef',
-                '407595e3-3196-11f0-9e07-0e8e5d906eef'
-            ) AND c.profile_status IN ('IMPORTED','INVITED')
-
-            ORDER BY c.created_at DESC
+            LEFT JOIN tbl_zqnq_users zu ON zu.id = c.zynq_user_id
+            WHERE ${conditions}
+            ORDER BY ${orderByCol} ${orderDir}
         `;
 
-        return await db.query(sql);
+        if (limit !== undefined && limit !== null && offset !== undefined && offset !== null) {
+            query += ` LIMIT ? OFFSET ?`;
+            params.push(limit, offset);
+        }
+
+        return await db.query(query, params);
 
     } catch (error) {
         console.error("Database Error:", error.message);
-        throw new Error("Failed to get doctor management data.");
+        throw new Error("Failed to get clinic invitation list.");
     }
 };
 
