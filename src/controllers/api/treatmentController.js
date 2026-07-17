@@ -575,9 +575,16 @@ export const deleteSubTreatment = asyncHandler(async (req, res) => {
     const { sub_treatment_id } = req.params;
     const role = req.user?.role;
     const user_id = req.user?.id;
-    console.log(user_id, '<=user_id')
-
     const language = req.user?.language || 'en';
+
+    // Check if sub-treatment is mapped to active treatments
+    const dependencies = await checkSubTreatmentMasterDependencies(sub_treatment_id);
+    if (dependencies.treatments > 0) {
+        return handleError(res, 400, language, "CANNOT_DELETE_SUBTREATMENT_ACTIVE_DEPENDENCIES", {
+            mappedTreatments: dependencies.treatments
+        });
+    }
+
     if (role === "ADMIN") {
         await deleteSubTreatmentModel(sub_treatment_id)
     } else {
