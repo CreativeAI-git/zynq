@@ -363,5 +363,6 @@
   "CANNOT_DELETE_CONCERN_ACTIVE_DEPENDENCIES": "Kan inte radera besväret eftersom det är kopplat till aktiva behandlingar eller användare.",
   "CANNOT_DELETE_LIKEWISETERM_ACTIVE_DEPENDENCIES": "Kan inte radera relaterad term eftersom den är kopplad till aktiva behandlingar.",
   "CANNOT_DELETE_DEVICE_ACTIVE_DEPENDENCIES": "Kan inte radera enheten eftersom den är kopplad till aktiva behandlingar.",
-  "CANNOT_DELETE_BENEFIT_ACTIVE_DEPENDENCIES": "Kan inte radera fördelen eftersom den är kopplad till aktiva behandlingar."
+  "CANNOT_DELETE_BENEFIT_ACTIVE_DEPENDENCIES": "Kan inte radera fördelen eftersom den är kopplad till aktiva behandlingar.",
+  "CANNOT_DELETE_SUBTREATMENT_ACTIVE_DEPENDENCIES": "Kan inte radera undertjänsten eftersom den är kopplad till aktiva behandlingar."
 }
