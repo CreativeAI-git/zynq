@@ -86,6 +86,7 @@ import {
     get_devices_count,
     get_benefits_count,
     get_concerns_count,
+    get_sub_treatment_master_count,
     checkTreatmentDependencies,
     checkDeviceDependencies,
     checkConcernDependencies,
@@ -787,8 +788,38 @@ export const getAllTreatments = asyncHandler(async (req, res) => {
 
 export const getAllSubTreatmentMasters = asyncHandler(async (req, res) => {
     const language = req?.user?.language || "en";
+    const role = req.user?.role;
+    const zynq_user_id = req.user?.id;
+    const isAdmin = role === "ADMIN";
 
-    const subTreatments = await getAllSubTreatmentsMasterModel();
+    // Read query parameters
+    const page = parseInt(req.query.page) || 1;
+    const limit = req.query.limit ? parseInt(req.query.limit) : null;
+    const search = req.query.search || "";
+    const sortBy = req.query.sortBy || "created_at";
+    const sortOrder = req.query.sortOrder || "DESC";
+    const status = req.query.status || "";
+
+    const offset = limit ? (page - 1) * limit : 0;
+
+    const [subTreatments, total] = await Promise.all([
+        getAllSubTreatmentsMasterModel({
+            limit,
+            offset,
+            search,
+            sortBy,
+            sortOrder,
+            status,
+            isAdmin,
+            zynq_user_id
+        }),
+        get_sub_treatment_master_count({
+            search,
+            status,
+            isAdmin,
+            zynq_user_id
+        })
+    ]);
 
     const approved = [];
     const others = [];
@@ -804,7 +835,11 @@ export const getAllSubTreatmentMasters = asyncHandler(async (req, res) => {
     const response = {
         ALL: subTreatments,
         APPROVED: approved,
-        OTHERS: others
+        OTHERS: others,
+        total,
+        page,
+        limit: limit || total,
+        totalPages: limit ? Math.ceil(total / limit) : 1
     };
 
     return handleSuccess(res, 200, language, "SUB_TREATMENTS_FETCHED", applyLanguageOverwrite(response, language));
