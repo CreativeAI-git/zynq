@@ -1,4 +1,5 @@
 import { createPaymentSession, getCartMetadataAndStatusByCartId, getProductsByCartId, getProductsData, insertPayment, insertProductPurchase, processPaymentMetadata, updateCartMetadata, updateCartPurchasedStatus, updateLatestAddress, updatePaymentStatus, updatePaymentStatusModel, updateProductsStock, updateProductsStockBulk, updateShipmentStatusModel } from "../../models/payment.js";
+import db from "../../config/db.js";
 import { NOTIFICATION_MESSAGES, sendNotification } from "../../services/notifications.service.js";
 import {
     asyncHandler,
@@ -302,6 +303,38 @@ export const stripeSuccessHandler = asyncHandler(async (req, res) => {
 });
 
 export const stripeCancelHandler = asyncHandler(async (req, res) => {
+    const { appointment_id, session_id, redirect_url } = req.query;
+
+    console.log(`🧹 Intercepted Stripe Cancel Redirect for Appointment: ${appointment_id}, Session: ${session_id}`);
+
+    try {
+        // 1. Expire the Stripe Checkout Session immediately
+        if (session_id && stripe) {
+            try {
+                await stripe.checkout.sessions.expire(session_id);
+                console.log(`✅ Successfully expired Stripe session: ${session_id}`);
+            } catch (expireErr) {
+                console.error(`⚠️ Failed to expire Stripe session ${session_id}:`, expireErr.message);
+            }
+        }
+
+        // 2. Mark the appointment status as 'Cancelled' and payment_status as 'failed' in DB
+        if (appointment_id) {
+            await db.query(
+                `UPDATE tbl_appointments SET status = 'Cancelled', payment_status = 'failed' WHERE appointment_id = ?`,
+                [appointment_id]
+            );
+            console.log(`✅ Marked appointment ${appointment_id} as Cancelled in DB`);
+        }
+    } catch (err) {
+        console.error("❌ Error in stripeCancelHandler:", err.message);
+    }
+
+    // 3. Redirect back to the app's original redirect URL
+    if (redirect_url) {
+        return res.redirect(redirect_url);
+    }
+
     return handleSuccess(res, 200, "en", "PAYMENT_CANCELLED_SUCCESSFULLY");
 });
 

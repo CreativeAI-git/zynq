@@ -509,6 +509,8 @@ export const createPaymentSessionForAppointment = async ({ metadata }) => {
       quantity: line.quantity,
     }));
 
+    const baseUrl = process.env.APP_URL ? (process.env.APP_URL.endsWith('/') ? process.env.APP_URL : `${process.env.APP_URL}/`) : 'https://getzynq.io:4000/';
+
     return await stripe.checkout.sessions.create({
       mode: "payment",
 
@@ -520,14 +522,19 @@ export const createPaymentSessionForAppointment = async ({ metadata }) => {
 
       line_items,
       success_url: `${CLINIC_URL}payment-success/?appointment_id=${metadata.appointment_id}&redirect_url=${metadata.redirect_url}`,
-      cancel_url: `${CLINIC_URL}payment-cancel/?redirect_url=${metadata.cancel_url}`,
+      cancel_url: `${baseUrl}api/payments/cancel?appointment_id=${metadata.appointment_id}&session_id={CHECKOUT_SESSION_ID}&redirect_url=${encodeURIComponent(metadata.cancel_url)}`,
 
       metadata: {
         appointment_id: metadata.appointment_id,
         payment_flow: "PAY_NOW",
         currency: metadata.currency || "sek",
       },
-
+      payment_intent_data: {
+        metadata: {
+          appointment_id: metadata.appointment_id,
+          payment_flow: "PAY_NOW"
+        }
+      },
       locale: "auto",
     });
   } catch (error) {
@@ -612,8 +619,14 @@ export const createPaymentSessionForAppointmentPAYLATERKLARNA = async ({ metadat
       customer_creation: "if_required",
 
       success_url: `${CLINIC_URL}payment-success/?appointment_id=${metadata.appointment_id}&redirect_url=${metadata.redirect_url}`,
-      cancel_url: `${CLINIC_URL}payment-cancel/?redirect_url=${metadata.cancel_url}`,
+      cancel_url: `${process.env.APP_URL ? (process.env.APP_URL.endsWith('/') ? process.env.APP_URL : `${process.env.APP_URL}/`) : 'https://getzynq.io:4000/'}api/payments/cancel?appointment_id=${metadata.appointment_id}&session_id={CHECKOUT_SESSION_ID}&redirect_url=${encodeURIComponent(metadata.cancel_url)}`,
       metadata: { appointment_id: metadata.appointment_id, payment_flow: "PAY_LATER_KLARNA" },
+      payment_intent_data: {
+        metadata: {
+          appointment_id: metadata.appointment_id,
+          payment_flow: "PAY_LATER_KLARNA"
+        }
+      },
     });
 
   } catch (error) {
