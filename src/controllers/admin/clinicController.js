@@ -119,13 +119,6 @@ export const add_clinic_managment = async (req, res) => {
             const email = ele['Email'];
 
             try {
-                // Check clinic name existence
-                const nameExists = await adminModels.checkExistingClinicByNameModel(ele['Clinic Name']);
-                if (nameExists) {
-                    skippedClinics.push({ email, reason: `Clinic name '${ele['Clinic Name']}' already exists` });
-                    return;
-                }
-
                 // Check email existence
                 const existingUser = await adminModels.findClinicEmail(email);
                 if (existingUser?.length > 0) {
@@ -722,13 +715,6 @@ export const add_clinic_with_onboarding = async (req, res) => {
 
         const roleId = findRole.id;
 
-        if (clinic_name) {
-            const nameExists = await adminModels.checkExistingClinicByNameModel(clinic_name);
-            if (nameExists) {
-                return handleError(res, 400, 'en', "Clinic name already exists", { clinic_name });
-            }
-        }
-
         // Check if email already exists
         const existingUser = await adminModels.findClinicEmail(email);
         if (existingUser?.length > 0) {
@@ -1246,13 +1232,6 @@ export const updateClinicController = async (req, res) => {
             same_for_all,
             slot_time
         } = value;
-
-        if (clinic_name) {
-            const nameExists = await adminModels.checkExistingClinicByNameModel(clinic_name, zynq_user_id);
-            if (nameExists) {
-                return handleError(res, 400, 'en', "Clinic name already exists", { clinic_name });
-            }
-        }
 
         const uploadedFiles = req.files;
 
