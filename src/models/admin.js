@@ -134,9 +134,9 @@ export const get_users_count = async (search) => {
         const params = [];
 
         if (search) {
-            whereClause += " AND (tbl_users.first_name LIKE ? OR tbl_users.last_name LIKE ? OR tbl_users.email LIKE ? OR tbl_users.mobile_number LIKE ?)";
+            whereClause += " AND (tbl_users.full_name LIKE ? OR tbl_users.email LIKE ? OR tbl_users.mobile_number LIKE ?)";
             const searchPattern = `%${search}%`;
-            params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+            params.push(searchPattern, searchPattern, searchPattern);
         }
 
         const sql = `SELECT COUNT(tbl_users.user_id) AS count FROM tbl_users ${whereClause};`;
@@ -151,8 +151,7 @@ export const get_users_count = async (search) => {
 export const get_users_managment = async (limit, offset, search, sortBy, sortOrder) => {
     try {
         const allowedSortColumns = {
-            first_name: 'tbl_users.first_name',
-            last_name: 'tbl_users.last_name',
+            full_name: 'tbl_users.full_name',
             email: 'tbl_users.email',
             mobile_number: 'tbl_users.mobile_number',
             created_at: 'tbl_users.created_at',
@@ -166,9 +165,9 @@ export const get_users_managment = async (limit, offset, search, sortBy, sortOrd
         const params = [];
 
         if (search) {
-            whereClause += " AND (tbl_users.first_name LIKE ? OR tbl_users.last_name LIKE ? OR tbl_users.email LIKE ? OR tbl_users.mobile_number LIKE ?)";
+            whereClause += " AND (tbl_users.full_name LIKE ? OR tbl_users.email LIKE ? OR tbl_users.mobile_number LIKE ?)";
             const searchPattern = `%${search}%`;
-            params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+            params.push(searchPattern, searchPattern, searchPattern);
         }
 
         const sql = `SELECT
