@@ -2605,9 +2605,67 @@ ORDER BY
     }
 };
 
-export const getAllSubTreatmentsMasterModel = async () => {
+export const get_sub_treatment_master_count = async ({ search = "", status = "", isAdmin = false, zynq_user_id = null }) => {
     try {
-        const query = `
+        let conditions = "is_deleted = 0";
+        const params = [];
+
+        if (!isAdmin && zynq_user_id) {
+            conditions += " AND (created_by = ? OR approval_status = 'APPROVED')";
+            params.push(zynq_user_id);
+        }
+
+        if (status) {
+            conditions += " AND approval_status = ?";
+            params.push(status);
+        }
+
+        if (search) {
+            conditions += " AND (name LIKE ? OR swedish LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern);
+        }
+
+        const sql = `SELECT COUNT(*) AS count FROM tbl_sub_treatment_master WHERE ${conditions};`;
+        const result = await db.query(sql, params);
+        return result[0]?.count || 0;
+    } catch (error) {
+        console.error("get_sub_treatment_master_count error:", error);
+        throw error;
+    }
+};
+
+export const getAllSubTreatmentsMasterModel = async ({ limit, offset, search = "", sortBy = "created_at", sortOrder = "DESC", status = "", isAdmin = false, zynq_user_id = null } = {}) => {
+    try {
+        let conditions = "is_deleted = 0";
+        const params = [];
+
+        if (!isAdmin && zynq_user_id) {
+            conditions += " AND (created_by = ? OR approval_status = 'APPROVED')";
+            params.push(zynq_user_id);
+        }
+
+        if (status) {
+            conditions += " AND approval_status = ?";
+            params.push(status);
+        }
+
+        if (search) {
+            conditions += " AND (name LIKE ? OR swedish LIKE ?)";
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern);
+        }
+
+        const allowedSortColumns = {
+            name: 'name',
+            swedish: 'swedish',
+            created_at: 'created_at',
+            approval_status: 'approval_status'
+        };
+        const orderByCol = allowedSortColumns[sortBy] || 'created_at';
+        const orderDir = (sortOrder && sortOrder.toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
+        let query = `
             SELECT 
                 sub_treatment_id,
                 name,
@@ -2618,18 +2676,20 @@ export const getAllSubTreatmentsMasterModel = async () => {
                 is_admin_created,
                 created_at,
                 updated_at
-
             FROM 
                 tbl_sub_treatment_master
-
             WHERE 
-                is_deleted = 0
-
+                ${conditions}
             ORDER BY 
-                created_at DESC
+                ${orderByCol} ${orderDir}
         `;
 
-        return await db.query(query);
+        if (limit !== undefined && limit !== null && offset !== undefined && offset !== null) {
+            query += ` LIMIT ? OFFSET ?`;
+            params.push(limit, offset);
+        }
+
+        return await db.query(query, params);
 
     } catch (error) {
         console.error("getAllSubTreatmentsMasterModel error:", error);
