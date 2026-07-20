@@ -492,14 +492,17 @@ const enrichNotifications = (notifications, senderDetails) => {
 
 export const getUserNotifications = async (userData, language) => {
     try {
-        const { user_id: receiver_id } = extractUserData(userData);
+        const { user_id: receiver_id, role } = extractUserData(userData);
 
-        const notifications = await db.query(
-            `SELECT * FROM tbl_notifications
-             WHERE receiver_id = ?
-             ORDER BY created_at DESC`,
-            [receiver_id]
-        );
+        let query = `SELECT * FROM tbl_notifications WHERE receiver_id = ? ORDER BY created_at DESC`;
+        let params = [receiver_id];
+
+        if (role === 'ADMIN') {
+            query = `SELECT * FROM tbl_notifications ORDER BY created_at DESC`;
+            params = [];
+        }
+
+        const notifications = await db.query(query, params);
 
         if (notifications.length === 0) return [];
 
