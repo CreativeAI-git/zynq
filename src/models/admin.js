@@ -5177,7 +5177,7 @@ export const checkSubTreatmentMasterDependencies = async (sub_treatment_id) => {
 export const getDoctorById = async (doctor_id) => {
     try {
         return await db.query(
-            `SELECT d.doctor_id, d.first_name, d.last_name, d.is_deleted, zu.email
+            `SELECT d.doctor_id, d.name, d.last_name, d.is_deleted, zu.email
              FROM tbl_doctors d
              LEFT JOIN tbl_zqnq_users zu ON d.zynq_user_id = zu.id
              WHERE d.doctor_id = ?
