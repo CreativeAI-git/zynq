@@ -2316,3 +2316,48 @@ export const sendDoctorInvitationListController = async (req, res) => {
         return handleError(res, 500, 'en', "INTERNAL_SERVER_ERROR " + error.message);
     }
 };
+
+// ✅ DELETE EXPERT — with active appointment check
+export const deleteExpertController = async (req, res) => {
+    try {
+        const language = 'en';
+        const { doctor_id } = req.params;
+
+        if (!doctor_id) {
+            return handleError(res, 400, language, "Expert ID is required.");
+        }
+
+        // 1. Check if expert exists
+        const doctorRows = await adminModels.getDoctorById(doctor_id);
+        if (!doctorRows || doctorRows.length === 0) {
+            return handleError(res, 404, language, "Expert not found.");
+        }
+
+        const doctor = doctorRows[0];
+        const expertName = `${doctor.first_name || ''} ${doctor.last_name || ''}`.trim() || 'This expert';
+
+        // 2. Check for active appointments
+        const activeAppointments = await adminModels.checkDoctorActiveAppointments(doctor_id);
+        if (activeAppointments && activeAppointments.length > 0) {
+            const appt = activeAppointments[0];
+            const isOngoing = appt.status !== 'Upcoming' && appt.status !== 'Rescheduled';
+            const statusLabel = isOngoing ? 'Ongoing' : appt.status;
+
+            return handleError(res, 409, language,
+                `Expert "${expertName}" cannot be deleted because they have an ${statusLabel} appointment (ID: ${appt.appointment_id}). Please complete or cancel all active appointments before deleting this expert.`
+            );
+        }
+
+        // 3. Soft delete the expert
+        await adminModels.softDeleteDoctorById(doctor_id);
+
+        return handleSuccess(res, 200, language, "Expert deleted successfully.", {
+            doctor_id,
+            expert_name: expertName,
+        });
+
+    } catch (error) {
+        console.error("deleteExpertController error:", error);
+        return handleError(res, 500, 'en', "INTERNAL_SERVER_ERROR " + error.message);
+    }
+};

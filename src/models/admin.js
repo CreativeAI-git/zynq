@@ -5172,3 +5172,54 @@ export const checkSubTreatmentMasterDependencies = async (sub_treatment_id) => {
         throw error;
     }
 };
+
+// ✅ Get expert by doctor_id
+export const getDoctorById = async (doctor_id) => {
+    try {
+        return await db.query(
+            `SELECT d.doctor_id, d.first_name, d.last_name, d.is_deleted, zu.email
+             FROM tbl_doctors d
+             LEFT JOIN tbl_zqnq_users zu ON d.zynq_user_id = zu.id
+             WHERE d.doctor_id = ? AND d.is_deleted = 0
+             LIMIT 1`,
+            [doctor_id]
+        );
+    } catch (error) {
+        console.error("getDoctorById error:", error);
+        throw error;
+    }
+};
+
+// ✅ Check if expert has any active appointments (Upcoming, Rescheduled, or currently Ongoing)
+export const checkDoctorActiveAppointments = async (doctor_id) => {
+    try {
+        const rows = await db.query(
+            `SELECT appointment_id, status, start_time, end_time
+             FROM tbl_appointments
+             WHERE doctor_id = ?
+               AND (
+                    status IN ('Upcoming', 'Rescheduled')
+                    OR (start_time <= NOW() AND end_time >= NOW())
+               )
+             LIMIT 1`,
+            [doctor_id]
+        );
+        return rows;
+    } catch (error) {
+        console.error("checkDoctorActiveAppointments error:", error);
+        throw error;
+    }
+};
+
+// ✅ Soft delete expert (doctor) by setting is_deleted = 1
+export const softDeleteDoctorById = async (doctor_id) => {
+    try {
+        return await db.query(
+            `UPDATE tbl_doctors SET is_deleted = 1 WHERE doctor_id = ?`,
+            [doctor_id]
+        );
+    } catch (error) {
+        console.error("softDeleteDoctorById error:", error);
+        throw error;
+    }
+};
