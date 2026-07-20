@@ -97,7 +97,7 @@ export const get_admin_earning = async () => {
                 ROUND(
                     ( (SELECT COALESCE(SUM(admin_earnings), 0) FROM tbl_product_purchase)
                       +
-                      (SELECT COALESCE(SUM(admin_earnings), 0) FROM tbl_appointments)
+                      (SELECT COALESCE(SUM(admin_earnings), 0) FROM tbl_appointments WHERE save_type = 'booked' AND status != 'Cancelled' AND payment_status NOT IN ('unpaid', 'failed', 'refund_completed', 'refund_initiated'))
                     ), 2
                 ) AS total_admin_earnings,
 
@@ -108,7 +108,7 @@ export const get_admin_earning = async () => {
                 ROUND(
                     ( (SELECT COALESCE(SUM(total_price), 0) FROM tbl_product_purchase)
                       +
-                      (SELECT COALESCE(SUM(total_price), 0) FROM tbl_appointments)
+                      (SELECT COALESCE(SUM(total_price), 0) FROM tbl_appointments WHERE save_type = 'booked' AND status != 'Cancelled' AND payment_status NOT IN ('unpaid', 'failed', 'refund_completed', 'refund_initiated'))
                     ), 2
                 ) AS total_platform_earnings,
 
