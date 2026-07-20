@@ -264,7 +264,7 @@ export const sendDoctorOnaboardingInvitation = async (req, res) => {
                         sub_treatments: Joi.array().items(
                             Joi.object({
                                 sub_treatment_id: Joi.string().required(),
-                                sub_treatment_price: Joi.number().required()
+                                sub_treatment_price: Joi.number().optional().allow(null, '')
                             })
                         ).optional()
                     })
@@ -784,7 +784,7 @@ export const sendSoloDoctorOnaboardingInvitation = async (req, res) => {
                     sub_treatments: Joi.array().items(
                         Joi.object({
                             sub_treatment_id: Joi.string().required(),
-                            sub_treatment_price: Joi.number().required()
+                            sub_treatment_price: Joi.number().optional().allow(null, '')
                         })
                     ).optional()
                 })
@@ -1238,7 +1238,7 @@ export const updateDoctorController = async (req, res) => {
                         sub_treatments: Joi.array().items(
                             Joi.object({
                                 sub_treatment_id: Joi.string().required(),
-                                sub_treatment_price: Joi.number().required()
+                                sub_treatment_price: Joi.number().optional().allow(null, '')
                             })
                         ).optional()
                     })
@@ -1624,7 +1624,7 @@ export const updateSoloDoctorController = async (req, res) => {
                     sub_treatments: Joi.array().items(
                         Joi.object({
                             sub_treatment_id: Joi.string().required(),
-                            sub_treatment_price: Joi.number().required()
+                            sub_treatment_price: Joi.number().optional().allow(null, '')
                         })
                     ).optional()
                 })

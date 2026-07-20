@@ -818,7 +818,7 @@ export const saveAppointmentAsDraft = async (req, res) => {
                     sub_treatments: Joi.array().items(
                         Joi.object({
                             sub_treatment_id: Joi.string().required(),
-                            sub_treatment_price: Joi.number().required()
+                            sub_treatment_price: Joi.number().optional().allow(null, '')
                         })
                     ).optional()
                 })
@@ -1720,7 +1720,7 @@ export const bookDirectAppointment = asyncHandler(async (req, res) => {
                     sub_treatments: Joi.array().items(
                         Joi.object({
                             sub_treatment_id: Joi.string().required(),
-                            sub_treatment_price: Joi.number().required()
+                            sub_treatment_price: Joi.number().optional().allow(null, '')
                         })
                     ).optional()
                 })
@@ -2788,10 +2788,10 @@ export const handleStripeWebhook = async (req, res) => {
     }
 };
 
-export const sendAppointmentConfirmationNotifications = async (appointment_id,userId) => {
+export const sendAppointmentConfirmationNotifications = async (appointment_id, userId) => {
     try {
         const appointmentDetails = await getAppointmentDetails(userId, appointment_id);
-        
+
         if (!appointmentDetails) {
             console.error(`Appointment ${appointment_id} not found`);
             return false;
@@ -2845,7 +2845,7 @@ export const sendAppointmentConfirmationNotifications = async (appointment_id,us
 
         // Get appointment details for user email
         const appointments = await appointmentModel.getAppointmentsById(user_id, appointment_id, language);
-        
+
         if (!appointments || appointments.length === 0) {
             console.error(`Appointment details not found for ${appointment_id}`);
             return false;
@@ -2900,7 +2900,7 @@ export const sendAppointmentConfirmationNotifications = async (appointment_id,us
         // Send email to user based on language
         if (language === "en") {
             emailData.refund_policy = "This appointment can be cancelled and will be fully refunded up to 24 hours before the schedule time.";
-            
+
             await sendEmail({
                 to: user.email,
                 subject: appointmentBookingConfirmationTemplate.subject(data.payment_timing),
@@ -2908,7 +2908,7 @@ export const sendAppointmentConfirmationNotifications = async (appointment_id,us
             });
         } else {
             emailData.refund_policy = "Denna bokade tid kan avbokas och återbetalas i sin helhet upp till 24 timmar före den schemalagda tiden.";
-            
+
             await sendEmail({
                 to: user.email,
                 subject: appointmentBookingConfirmationTemplateSwedish.subject(data.payment_timing),
