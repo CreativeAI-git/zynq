@@ -3,6 +3,7 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 import * as apiModels from '../../models/api.js';
+import db from '../../config/db.js';
 import { sendEmail } from '../../services/send_email.js';
 import { isEmpty } from '../../utils/user_helper.js';
 import {
@@ -23,6 +24,24 @@ dotenv.config();
 
 const APP_URL = process.env.APP_URL;
 const image_logo = process.env.LOGO_URL;
+
+// ✅ Batch fetch sub-treatments for multiple treatment IDs in a single DB query
+const getSubTreatmentsForTreatmentIdsBatch = async (treatment_ids = [], lang = 'en') => {
+    if (!treatment_ids || treatment_ids.length === 0) return {};
+    const rows = await db.query(
+        `SELECT ttst.treatment_id, ttst.sub_treatment_id, tstm.name, tstm.swedish, tstm.approval_status, tstm.is_deleted
+         FROM tbl_treatment_sub_treatments ttst
+         JOIN tbl_sub_treatment_master tstm ON ttst.sub_treatment_id = tstm.sub_treatment_id
+         WHERE ttst.treatment_id IN (?) AND tstm.is_deleted = 0 AND tstm.approval_status = 'APPROVED'`,
+        [treatment_ids]
+    );
+    const groups = {};
+    for (const r of rows) {
+        if (!groups[r.treatment_id]) groups[r.treatment_id] = [];
+        groups[r.treatment_id].push({ ...r, name: lang === 'sv' ? r.swedish : r.name });
+    }
+    return groups;
+};
 
 export const add_face_scan_result = async (req, res) => {
     try {
@@ -180,23 +199,19 @@ export const get_treatments_by_concerns = async (req, res) => {
         if (filters?.treatment_ids?.length > 0) {
             const treatments = await apiModels.getTreatmentsByIds(filters.treatment_ids, language);
             const newTreatments = await getTreatmentsAIResult(treatments, filters?.search);
+            const treatmentIds = newTreatments.map(t => t.treatment_id);
+            const subTreatmentsMap = await getSubTreatmentsForTreatmentIdsBatch(treatmentIds, language);
             for (var treatment of newTreatments) {
-                treatment.sub_treatments = await apiModels.getSubTreatmentsByTreatmentId(
-                    treatment.treatment_id,
-                    language
-                );
-                // console.log("sub_treatments", treatment.sub_treatments);
+                treatment.sub_treatments = subTreatmentsMap[treatment.treatment_id] || [];
             }
             return handleSuccess(res, 200, 'en', 'TREATMENTS_FETCHED',applyLanguageOverwrite(newTreatments, language));
         } else {
             const treatments = await apiModels.getTreatmentsByConcernIds(concern_ids, language);
             const newTreatments = await getTreatmentsAIResult(treatments, filters?.search);
+            const treatmentIds = newTreatments.map(t => t.treatment_id);
+            const subTreatmentsMap = await getSubTreatmentsForTreatmentIdsBatch(treatmentIds, language);
             for (var treatment of newTreatments) {
-                treatment.sub_treatments = await apiModels.getSubTreatmentsByTreatmentId(
-                    treatment.treatment_id,
-                    language
-                );
-                // console.log(treatment.sub_treatments);
+                treatment.sub_treatments = subTreatmentsMap[treatment.treatment_id] || [];
             }
             return handleSuccess(res, 200, 'en', 'TREATMENTS_FETCHED', applyLanguageOverwrite(newTreatments, language));
         }
@@ -213,14 +228,11 @@ export const get_treatments = asyncHandler(async (req, res) => {
     const { filters } = req.body;
     const treatments = await apiModels.getAllTreatmentsV2(filters, language, user_id);
 
-    await Promise.all(
-        treatments.map(async (treatment) => {
-            treatment.sub_treatments = await apiModels.getSubTreatmentsByTreatmentId(
-                treatment.treatment_id,
-                language
-            );
-        })
-    );
+    const treatmentIds = treatments.map(t => t.treatment_id);
+    const subTreatmentsMap = await getSubTreatmentsForTreatmentIdsBatch(treatmentIds, language);
+    for (const treatment of treatments) {
+        treatment.sub_treatments = subTreatmentsMap[treatment.treatment_id] || [];
+    }
     return handleSuccess(res, 200, 'en', 'TREATMENTS_FETCHED', treatments);
 });
 
