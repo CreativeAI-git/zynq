@@ -325,7 +325,7 @@ export const getAllDoctors = async ({
 
         if (joins.length) query += ' ' + joins.join(' ');
 
-        query += ` WHERE d.profile_status = 'VERIFIED'`;
+        query += ` WHERE d.profile_status = 'VERIFIED' AND d.is_deleted = 0`;
         if (filters.length) query += ` AND ${filters.join(' AND ')}`;
 
         // ---------- Search clause ----------
@@ -510,7 +510,7 @@ export const getAllRecommendedDoctors = async ({
         addFilter(surgery_ids, 'ds', 'surgery_id');
 
         // Verified doctors only
-        query += ` WHERE d.name IS NOT NULL AND d.profile_status = 'VERIFIED' `;
+        query += ` WHERE d.name IS NOT NULL AND d.profile_status = 'VERIFIED' AND d.is_deleted = 0 `;
 
         // Distance filters
         if (needsDistance) {

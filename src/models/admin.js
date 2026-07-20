@@ -697,7 +697,8 @@ export const get_doctors_management = async (limit, offset, search = "", type = 
         const searchQuery = `%${search}%`;
 
         let conditions = `
-            u.role_id IN (
+            d.is_deleted = 0
+            AND u.role_id IN (
                 '407595e3-3196-11f0-9e07-0e8e5d906eef',  -- Solo Doctor
                 '3677a3e6-3196-11f0-9e07-0e8e5d906eef'   -- Doctor
             )
@@ -791,7 +792,8 @@ export const get_doctors_count = async (search = "", type = "") => {
         const searchQuery = `%${search}%`;
 
         let conditions = `
-            u.role_id IN (
+            d.is_deleted = 0
+            AND u.role_id IN (
                 '407595e3-3196-11f0-9e07-0e8e5d906eef',  -- Solo Doctor
                 '3677a3e6-3196-11f0-9e07-0e8e5d906eef'   -- Doctor
             )
