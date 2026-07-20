@@ -1220,14 +1220,13 @@ export const cancelAppointment = async (appointment_id, data) => {
 
 
 export const updateAppointmentAsPaid = async (appointment_id, status) => {
-
-
+    const is_paid = status === 'paid' ? 1 : 0;
     const query = `
     UPDATE tbl_appointments
-    SET payment_status = ?
+    SET payment_status = ?, is_paid = ?
     WHERE appointment_id = ?
   `;
-    return await db.query(query, [status, appointment_id]);
+    return await db.query(query, [status, is_paid, appointment_id]);
 };
 
 
