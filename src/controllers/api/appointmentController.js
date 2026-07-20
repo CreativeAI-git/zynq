@@ -398,7 +398,7 @@ export const saveOrBookAppointment = async (req, res) => {
         const ADMIN_EARNING_PERCENTAGE = APPOINTMENT_COMMISSION || 3;
         const admin_earnings = Number(((total_price * ADMIN_EARNING_PERCENTAGE) / 100).toFixed(2));
         const clinic_earnings = Number(total_price) - admin_earnings;
-        const is_paid = total_price > 0 ? 1 : 0;
+        const is_paid = total_price > 0 ? 0 : 1;
 
         const appointmentData = {
             appointment_id,
@@ -1847,7 +1847,7 @@ export const bookDirectAppointment = asyncHandler(async (req, res) => {
         let admin_earnings = +((final_total * ADMIN_EARNING_PERCENTAGE) / 100).toFixed(2);
         let clinic_earnings = +(final_total - admin_earnings).toFixed(2);
 
-        const is_paid = final_total > 0 ? 1 : 0;
+        const is_paid = final_total > 0 ? 0 : 1;
         console.log('final_total>>>>', final_total);
 
         // ---------------- Appointment Data ----------------

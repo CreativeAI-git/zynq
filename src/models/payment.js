@@ -782,7 +782,7 @@ export const handlePaymentIntentSucceeded = async (paymentIntent) => {
 
   // Mark appointment as paid
   const update = await db.query(
-    `UPDATE tbl_appointments SET payment_status = ? WHERE appointment_id = ?`,
+    `UPDATE tbl_appointments SET payment_status = ?, is_paid = 1 WHERE appointment_id = ?`,
     ["paid", appointment_id]
   );
 
