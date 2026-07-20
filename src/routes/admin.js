@@ -9,6 +9,7 @@ import * as dashboardControllers from "../controllers/admin/dashboardController.
 import * as userControllers from "../controllers/admin/userController.js";
 import * as clinicControllers from "../controllers/admin/clinicController.js";
 import * as doctorControllers from "../controllers/admin/doctorController.js";
+import { deleteExpertController } from "../controllers/admin/doctorController.js";
 import * as productControllers from "../controllers/admin/productController.js";
 import * as supportControllers from "../controllers/admin/supportController.js";
 import { getLegalDocuments, updateLegalDocuments } from '../controllers/api/legalController.js';
@@ -588,5 +589,7 @@ router.get("/device",authenticateAdmin,getAllDevices);
 
 router.get("/benefit",authenticateAdmin,getAllBenefits);
 
+// ✅ Delete Expert (Doctor) — with active appointment check
+router.delete("/delete-expert/:doctor_id", authenticateAdmin, deleteExpertController);
 
 export default router;
