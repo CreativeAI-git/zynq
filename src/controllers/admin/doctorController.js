@@ -2327,7 +2327,7 @@ export const deleteExpertController = async (req, res) => {
             return handleError(res, 400, language, "Expert ID is required.");
         }
 
-        // 1. Check if expert exists
+        // 1. Check if expert exists (any state)
         const doctorRows = await adminModels.getDoctorById(doctor_id);
         if (!doctorRows || doctorRows.length === 0) {
             return handleError(res, 404, language, "Expert not found.");
@@ -2336,7 +2336,12 @@ export const deleteExpertController = async (req, res) => {
         const doctor = doctorRows[0];
         const expertName = `${doctor.first_name || ''} ${doctor.last_name || ''}`.trim() || 'This expert';
 
-        // 2. Check for active appointments
+        // 2. Already deleted?
+        if (doctor.is_deleted === 1) {
+            return handleError(res, 409, language, `Expert "${expertName}" is already deleted.`);
+        }
+
+        // 3. Check for active appointments
         const activeAppointments = await adminModels.checkDoctorActiveAppointments(doctor_id);
         if (activeAppointments && activeAppointments.length > 0) {
             const appt = activeAppointments[0];
@@ -2348,7 +2353,7 @@ export const deleteExpertController = async (req, res) => {
             );
         }
 
-        // 3. Soft delete the expert
+        // 4. Soft delete the expert
         await adminModels.softDeleteDoctorById(doctor_id);
 
         return handleSuccess(res, 200, language, "Expert deleted successfully.", {
