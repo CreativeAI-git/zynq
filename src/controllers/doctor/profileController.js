@@ -1040,6 +1040,14 @@ export const getDoctorCertificatesWithPath = async (req, res) => {
 
         const profileData = await doctorModels.getCertificationsWithUploadPathByDoctorId(doctorId);
 
+        if (profileData && Array.isArray(profileData)) {
+            profileData.forEach(certification => {
+                if (certification.upload_path && !certification.upload_path.startsWith("http")) {
+                    certification.upload_path = `${APP_URL}doctor/certifications/${certification.upload_path}`;
+                }
+            });
+        }
+
         return handleSuccess(res, 200, language, "DOCTOR_PROFILE_RETRIEVED", profileData);
     } catch (error) {
         console.error(error);
