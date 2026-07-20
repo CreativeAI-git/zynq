@@ -2334,7 +2334,7 @@ export const deleteExpertController = async (req, res) => {
         }
 
         const doctor = doctorRows[0];
-        const expertName = `${doctor.first_name || ''} ${doctor.last_name || ''}`.trim() || 'This expert';
+        const expertName = `${doctor.name || ''} ${doctor.last_name || ''}`.trim() || 'This expert';
 
         // 2. Already deleted?
         if (doctor.is_deleted === 1) {
