@@ -5177,7 +5177,7 @@ export const checkSubTreatmentMasterDependencies = async (sub_treatment_id) => {
 export const getDoctorById = async (doctor_id) => {
     try {
         return await db.query(
-            `SELECT d.doctor_id, d.name, d.last_name, d.is_deleted, zu.email
+            `SELECT d.doctor_id, d.name, d.last_name, d.zynq_user_id, d.is_deleted, zu.email
              FROM tbl_doctors d
              LEFT JOIN tbl_zqnq_users zu ON d.zynq_user_id = zu.id
              WHERE d.doctor_id = ?
@@ -5211,13 +5211,14 @@ export const checkDoctorActiveAppointments = async (doctor_id) => {
     }
 };
 
-// ✅ Soft delete expert (doctor) by setting is_deleted = 1
-export const softDeleteDoctorById = async (doctor_id) => {
+// ✅ Soft delete expert (doctor) in tbl_doctors and tbl_zqnq_users to preserve historical appointment records
+export const softDeleteDoctorById = async (doctor_id, zynq_user_id) => {
     try {
-        return await db.query(
-            `UPDATE tbl_doctors SET is_deleted = 1 WHERE doctor_id = ?`,
-            [doctor_id]
-        );
+        await db.query(`UPDATE tbl_doctors SET is_deleted = 1 WHERE doctor_id = ?`, [doctor_id]);
+        if (zynq_user_id) {
+            await db.query(`UPDATE tbl_zqnq_users SET is_deleted = 1 WHERE id = ?`, [zynq_user_id]);
+        }
+        return true;
     } catch (error) {
         console.error("softDeleteDoctorById error:", error);
         throw error;

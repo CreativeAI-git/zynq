@@ -2353,8 +2353,8 @@ export const deleteExpertController = async (req, res) => {
             );
         }
 
-        // 4. Soft delete the expert
-        await adminModels.softDeleteDoctorById(doctor_id);
+        // 4. Soft delete the expert and their auth account
+        await adminModels.softDeleteDoctorById(doctor_id, doctor.zynq_user_id);
 
         return handleSuccess(res, 200, language, "Expert deleted successfully.", {
             doctor_id,
