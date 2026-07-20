@@ -2791,7 +2791,8 @@ LEFT JOIN (
         JSON_ARRAYAGG(
             JSON_OBJECT(
                 'concern_id', c.concern_id,
-                'concern_name', c.name
+                'concern_name', c.name,
+                'concern_swedish', c.swedish
             )
         ) AS concerns
     FROM (
