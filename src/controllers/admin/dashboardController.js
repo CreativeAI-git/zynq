@@ -41,20 +41,26 @@ export const get_wallets = asyncHandler(async (req, res) => {
 export const getBookedAppointments = asyncHandler(async (req, res) => {
     const language = req?.user?.language || 'en';
     const appointments = await getAdminBookedAppointmentsModel();
+
+    const processedAppointments = appointments.map(appt => {
+        const isCancelledOrRefunded = appt.status === 'Cancelled' || ['unpaid', 'failed', 'refund_completed', 'refund_initiated'].includes(appt.payment_status);
+        return {
+            ...appt,
+            admin_earnings: isCancelledOrRefunded ? 0.00 : Number(appt.admin_earnings) || 0,
+            clinic_earnings: isCancelledOrRefunded ? 0.00 : Number(appt.clinic_earnings) || 0,
+            total_price: isCancelledOrRefunded ? 0.00 : Number(appt.total_price) || 0
+        };
+    });
+
     const {
         total_clinic_earnings,
         total_admin_earnings,
         total_appointments_earnings
-    } = appointments.reduce(
+    } = processedAppointments.reduce(
         (acc, appointment) => {
-            const clinicEarning = Number(appointment.clinic_earnings) || 0;
-            const adminEarning = Number(appointment.admin_earnings) || 0;
-            const appointmentEarning = Number(appointment.total_price) || 0;
-
-            acc.total_clinic_earnings += clinicEarning;
-            acc.total_admin_earnings += adminEarning;
-            acc.total_appointments_earnings += appointmentEarning;
-
+            acc.total_clinic_earnings += appointment.clinic_earnings;
+            acc.total_admin_earnings += appointment.admin_earnings;
+            acc.total_appointments_earnings += appointment.total_price;
             return acc;
         },
         {
@@ -68,7 +74,7 @@ export const getBookedAppointments = asyncHandler(async (req, res) => {
         total_clinic_earnings: Number(total_clinic_earnings.toFixed(2)),
         total_admin_earnings: Number(total_admin_earnings.toFixed(2)),
         total_appointments_earnings: Number(total_appointments_earnings.toFixed(2)),
-        appointments: appointments,
+        appointments: processedAppointments,
     }
     return handleSuccess(res, 200, language, "APPOINTMENTS_FETCHED", data);
 });
@@ -183,15 +189,26 @@ export const getEarnings = asyncHandler(async (req, res) => {
         getAdminPurchasedProductModel(),
         getAdminBookedAppointmentsModel()
     ])
+
+    const processedAppointments = appointments.map(appt => {
+        const isCancelledOrRefunded = appt.status === 'Cancelled' || ['unpaid', 'failed', 'refund_completed', 'refund_initiated'].includes(appt.payment_status);
+        return {
+            ...appt,
+            admin_earnings: isCancelledOrRefunded ? 0.00 : Number(appt.admin_earnings) || 0,
+            clinic_earnings: isCancelledOrRefunded ? 0.00 : Number(appt.clinic_earnings) || 0,
+            total_price: isCancelledOrRefunded ? 0.00 : Number(appt.total_price) || 0
+        };
+    });
+
     const {
         total_doctor_earnings: total_appointment_doctor_earnings,
         total_admin_earnings: total_appointment_admin_earnings,
         total_earnings: total_appointment_earnings
-    } = appointments.reduce(
+    } = processedAppointments.reduce(
         (acc, appointment) => {
-            acc.total_doctor_earnings += Number(appointment.clinic_earnings) || 0;
-            acc.total_admin_earnings += Number(appointment.admin_earnings) || 0;
-            acc.total_earnings += Number(appointment.total_price) || 0;
+            acc.total_doctor_earnings += appointment.clinic_earnings;
+            acc.total_admin_earnings += appointment.admin_earnings;
+            acc.total_earnings += appointment.total_price;
             return acc;
         },
         {
@@ -232,7 +249,7 @@ export const getEarnings = asyncHandler(async (req, res) => {
 
         total_admin_earnings: Number((total_appointment_admin_earnings + total_product_admin_earnings).toFixed(2)),
         total_platform_earnings: Number((total_appointment_earnings + total_product_earnings).toFixed(2)),
-        appointments,
+        appointments: processedAppointments,
         purchases
     };
 
