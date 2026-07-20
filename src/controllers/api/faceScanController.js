@@ -166,9 +166,17 @@ export const get_all_concerns = async (req, res) => {
 
 export const get_treatments_by_concerns = async (req, res) => {
     try {
-        const { concern_ids, filters } = req?.body;
+        let { concern_ids, filters, treatment_ids } = req?.body;
         const language = req?.user?.language || 'en';
         console.log("req?.user", req?.user);
+
+        if (!filters) {
+            filters = {};
+        }
+        if (treatment_ids && (!filters.treatment_ids || filters.treatment_ids.length === 0)) {
+            filters.treatment_ids = treatment_ids;
+        }
+
         if (filters?.treatment_ids?.length > 0) {
             const treatments = await apiModels.getTreatmentsByIds(filters.treatment_ids, language);
             const newTreatments = await getTreatmentsAIResult(treatments, filters?.search);
