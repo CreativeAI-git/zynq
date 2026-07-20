@@ -5180,7 +5180,7 @@ export const getDoctorById = async (doctor_id) => {
             `SELECT d.doctor_id, d.first_name, d.last_name, d.is_deleted, zu.email
              FROM tbl_doctors d
              LEFT JOIN tbl_zqnq_users zu ON d.zynq_user_id = zu.id
-             WHERE d.doctor_id = ? AND d.is_deleted = 0
+             WHERE d.doctor_id = ?
              LIMIT 1`,
             [doctor_id]
         );
