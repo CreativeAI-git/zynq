@@ -567,10 +567,12 @@ export const getClinicSurgeriesLevels = async (clinic_id) => {
 export const getClinicAestheticDevicesLevel = async (clinic_id) => {
     try {
         const devices = await db.query(
-            `SELECT DISTINCT ad.id,ad.treatment_id,ad.device_name,ad.created_at 
+            `SELECT DISTINCT ad.id, ad.treatment_id, ad.device_name, d.swedish, ad.created_at 
              FROM tbl_clinic_aesthetic_devices cad  
              INNER JOIN tbl_treatment_devices ad
-             ON ad.id = cad.aesthetic_devices_id 
+                 ON ad.id = cad.aesthetic_devices_id 
+             LEFT JOIN tbl_devices d
+                 ON d.device_id = ad.device_id
              WHERE cad.clinic_id = ? 
              ORDER BY ad.created_at DESC;`,
             [clinic_id]
