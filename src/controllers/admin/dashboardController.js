@@ -44,11 +44,25 @@ export const getBookedAppointments = asyncHandler(async (req, res) => {
 
     const processedAppointments = appointments.map(appt => {
         const isCancelledOrRefunded = appt.status === 'Cancelled' || ['unpaid', 'failed', 'refund_completed', 'refund_initiated'].includes(appt.payment_status);
+        
+        let admin_earnings = isCancelledOrRefunded ? 0.00 : Number(appt.admin_earnings) || 0;
+        let clinic_earnings = isCancelledOrRefunded ? 0.00 : Number(appt.clinic_earnings) || 0;
+        const total_price = isCancelledOrRefunded ? 0.00 : Number(appt.total_price) || 0;
+        let commission_percentage = Number(appt.commission_percentage) || 0;
+
+        // Fallback for valid completed/missed paid appointments that have 0.00 stored earnings in DB
+        if (!isCancelledOrRefunded && total_price > 0 && admin_earnings === 0 && clinic_earnings === 0) {
+            admin_earnings = Number(((total_price * 24) / 100).toFixed(2));
+            clinic_earnings = Number((total_price - admin_earnings).toFixed(2));
+            commission_percentage = 24.00;
+        }
+
         return {
             ...appt,
-            admin_earnings: isCancelledOrRefunded ? 0.00 : Number(appt.admin_earnings) || 0,
-            clinic_earnings: isCancelledOrRefunded ? 0.00 : Number(appt.clinic_earnings) || 0,
-            total_price: isCancelledOrRefunded ? 0.00 : Number(appt.total_price) || 0
+            admin_earnings,
+            clinic_earnings,
+            total_price,
+            commission_percentage
         };
     });
 
@@ -192,11 +206,25 @@ export const getEarnings = asyncHandler(async (req, res) => {
 
     const processedAppointments = appointments.map(appt => {
         const isCancelledOrRefunded = appt.status === 'Cancelled' || ['unpaid', 'failed', 'refund_completed', 'refund_initiated'].includes(appt.payment_status);
+        
+        let admin_earnings = isCancelledOrRefunded ? 0.00 : Number(appt.admin_earnings) || 0;
+        let clinic_earnings = isCancelledOrRefunded ? 0.00 : Number(appt.clinic_earnings) || 0;
+        const total_price = isCancelledOrRefunded ? 0.00 : Number(appt.total_price) || 0;
+        let commission_percentage = Number(appt.commission_percentage) || 0;
+
+        // Fallback for valid completed/missed paid appointments that have 0.00 stored earnings in DB
+        if (!isCancelledOrRefunded && total_price > 0 && admin_earnings === 0 && clinic_earnings === 0) {
+            admin_earnings = Number(((total_price * 24) / 100).toFixed(2));
+            clinic_earnings = Number((total_price - admin_earnings).toFixed(2));
+            commission_percentage = 24.00;
+        }
+
         return {
             ...appt,
-            admin_earnings: isCancelledOrRefunded ? 0.00 : Number(appt.admin_earnings) || 0,
-            clinic_earnings: isCancelledOrRefunded ? 0.00 : Number(appt.clinic_earnings) || 0,
-            total_price: isCancelledOrRefunded ? 0.00 : Number(appt.total_price) || 0
+            admin_earnings,
+            clinic_earnings,
+            total_price,
+            commission_percentage
         };
     });
 
