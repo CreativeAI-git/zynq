@@ -762,6 +762,7 @@ export const get_doctors_management = async (limit, offset, search = "", type = 
                 d.zip_code,
                 d.latitude,
                 d.longitude,
+                d.is_active,
                 CASE 
                     WHEN u.role_id = '407595e3-3196-11f0-9e07-0e8e5d906eef' THEN 'Solo Doctor'
                     WHEN u.role_id = '3677a3e6-3196-11f0-9e07-0e8e5d906eef' THEN 'Doctor'
