@@ -5179,7 +5179,7 @@ export const checkSubTreatmentMasterDependencies = async (sub_treatment_id) => {
 export const getDoctorById = async (doctor_id) => {
     try {
         return await db.query(
-            `SELECT d.doctor_id, d.name, d.last_name, d.zynq_user_id, d.is_deleted, zu.email
+            `SELECT d.doctor_id, d.name, d.last_name, d.zynq_user_id, d.is_deleted, d.is_active, zu.email
              FROM tbl_doctors d
              LEFT JOIN tbl_zqnq_users zu ON d.zynq_user_id = zu.id
              WHERE d.doctor_id = ?
@@ -5223,6 +5223,56 @@ export const softDeleteDoctorById = async (doctor_id, zynq_user_id) => {
         return true;
     } catch (error) {
         console.error("softDeleteDoctorById error:", error);
+        throw error;
+    }
+};
+
+// ✅ Update Expert active/inactive status
+export const updateDoctorStatusModel = async (doctor_id, is_active) => {
+    try {
+        await db.query(`UPDATE tbl_doctors SET is_active = ? WHERE doctor_id = ?`, [is_active, doctor_id]);
+        return true;
+    } catch (error) {
+        console.error("updateDoctorStatusModel error:", error);
+        throw error;
+    }
+};
+
+// ✅ Archive Expert email with suffix
+export const archiveExpertEmailModel = async (zynq_user_id, archivedEmail) => {
+    try {
+        await db.query(`UPDATE tbl_zqnq_users SET email = ?, is_deleted = 1 WHERE id = ?`, [archivedEmail, zynq_user_id]);
+        return true;
+    } catch (error) {
+        console.error("archiveExpertEmailModel error:", error);
+        throw error;
+    }
+};
+
+// ✅ Update email address of a ZYNQ Web User
+export const updateZynqUserEmail = async (zynq_user_id, email) => {
+    try {
+        await db.query(`UPDATE tbl_zqnq_users SET email = ? WHERE id = ?`, [email, zynq_user_id]);
+        return true;
+    } catch (error) {
+        console.error("updateZynqUserEmail error:", error);
+        throw error;
+    }
+};
+
+// ✅ Check if email is already associated with an active account
+export const checkZynqEmailExists = async (email, exclude_zynq_user_id = null) => {
+    try {
+        let query = `SELECT id FROM tbl_zqnq_users WHERE email = ? AND is_deleted = 0`;
+        let params = [email];
+        if (exclude_zynq_user_id) {
+            query += ` AND id != ?`;
+            params.push(exclude_zynq_user_id);
+        }
+        const rows = await db.query(query, params);
+        return rows.length > 0;
+    } catch (error) {
+        console.error("checkZynqEmailExists error:", error);
         throw error;
     }
 };

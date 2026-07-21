@@ -541,6 +541,8 @@ const uploadVariousFieldsForSoloDoctor = uploadCertificationFieldsTo([
 
 router.post("/add-doctor-onboarding", authenticateAdmin, uploadVariousFieldsForSoloDoctorDynamic, doctorControllers.sendDoctorOnaboardingInvitation);
 router.post("/update-doctor", authenticateAdmin, uploadVariousFieldsForSoloDoctorDynamic, doctorControllers.updateDoctorController);
+router.post("/update-doctor-status", authenticateAdmin, doctorControllers.updateDoctorStatusController);
+router.post("/archive-expert-email", authenticateAdmin, doctorControllers.archiveExpertEmailController);
 
 router.post("/add-solo-doctor-onboarding", authenticateAdmin, uploadVariousFieldsForSoloDoctorDynamic, doctorControllers.sendSoloDoctorOnaboardingInvitation);
 router.post("/update-solo-doctor", authenticateAdmin, uploadVariousFieldsForSoloDoctorDynamic, doctorControllers.updateSoloDoctorController);

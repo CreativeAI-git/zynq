@@ -68,6 +68,28 @@ export const login_web_user = async (req, res) => {
         const [get_clinic] = await clinicModels.get_clinic_by_zynq_user_id(existingWebUser.id);
         const [get_doctor] = await get_doctor_by_zynq_user_id(existingWebUser.id);
 
+        if (existingWebUser.role_name === 'CLINIC' && (!get_clinic || get_clinic.is_deleted === 1)) {
+            return handleError(res, 400, language, "CLINIC_DELETED");
+        }
+
+        if (existingWebUser.role_name === 'DOCTOR') {
+            if (!get_doctor || get_doctor.is_deleted === 1) {
+                return handleError(res, 400, language, "DOCTOR_DELETED");
+            }
+            if (get_doctor.is_active === 0) {
+                return handleError(res, 400, language, "DOCTOR_DEACTIVATED");
+            }
+        }
+
+        if (existingWebUser.role_name === 'SOLO_DOCTOR') {
+            if (!get_clinic || get_clinic.is_deleted === 1 || !get_doctor || get_doctor.is_deleted === 1) {
+                return handleError(res, 400, language, "USER_DELETED");
+            }
+            if (get_doctor.is_active === 0) {
+                return handleError(res, 400, language, "DOCTOR_DEACTIVATED");
+            }
+        }
+
         if (get_clinic) {
             const form_stage = get_clinic.form_stage;
             user_data.form_stage = form_stage;

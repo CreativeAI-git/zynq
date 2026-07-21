@@ -47,6 +47,9 @@ export const authenticate = (allowedRoles = []) => {
             if (userRole === 'DOCTOR') {
                 const [doctorData] = await doctorModels.get_doctor_by_zynquser_id(user.id);
                 if (doctorData) {
+                    if (doctorData.is_active === 0) {
+                        return handleError(res, 401, userLanguage, "DOCTOR_DEACTIVATED");
+                    }
                     user.doctorData = doctorData
                 } else {
                     return handleError(res, 401, 'en', "DOCTOR_NOT_FOUND");
@@ -68,6 +71,9 @@ export const authenticate = (allowedRoles = []) => {
                 const [doctorData] = await doctorModels.get_doctor_by_zynquser_id(user.id);
              
                 if (clinicData && doctorData) {
+                    if (doctorData.is_active === 0) {
+                        return handleError(res, 401, userLanguage, "DOCTOR_DEACTIVATED");
+                    }
                     user.clinicData = clinicData
                     user.doctorData = doctorData
                 } else {
