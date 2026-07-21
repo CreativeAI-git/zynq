@@ -1195,6 +1195,7 @@ export const updateDoctorController = async (req, res) => {
         const schema = Joi.object({
             clinic_id: Joi.array().items(Joi.string().uuid()).min(1).required(),
             zynq_user_id: Joi.string().uuid().required(),
+            email: Joi.string().email().optional().allow('', null),
             name: Joi.string().max(255).optional().allow('', null),
             phone: Joi.string().max(255).optional().allow('', null),
             age: Joi.string().optional().allow('', null),
@@ -1370,6 +1371,7 @@ export const updateDoctorController = async (req, res) => {
         const {
             clinic_id,
             zynq_user_id,
+            email,
             name,
             phone,
             age,
@@ -1399,6 +1401,14 @@ export const updateDoctorController = async (req, res) => {
 
         if (!doctorData) {
             return handleError(res, 404, language, "DOCTOR_NOT_FOUND");
+        }
+
+        if (email) {
+            const emailExists = await adminModels.checkZynqEmailExists(email, zynq_user_id);
+            if (emailExists) {
+                return handleError(res, 400, language, "This email address is already associated with another account.");
+            }
+            await adminModels.updateZynqUserEmail(zynq_user_id, email);
         }
         let doctorId = doctorData.doctor_id;
         let filename = doctorData.profile_image;
@@ -2363,6 +2373,96 @@ export const deleteExpertController = async (req, res) => {
 
     } catch (error) {
         console.error("deleteExpertController error:", error);
+        return handleError(res, 500, 'en', "INTERNAL_SERVER_ERROR " + error.message);
+    }
+};
+
+export const updateDoctorStatusController = async (req, res) => {
+    try {
+        const schema = Joi.object({
+            doctor_id: Joi.string().uuid().required(),
+            is_active: Joi.number().valid(0, 1).required()
+        });
+
+        const { error, value } = schema.validate(req.body);
+        if (error) return joiErrorHandle(res, error);
+
+        const { doctor_id, is_active } = value;
+        const language = req.user?.language || "en";
+
+        const [doctor] = await adminModels.getDoctorById(doctor_id);
+        if (!doctor) {
+            return handleError(res, 404, language, "DOCTOR_NOT_FOUND");
+        }
+
+        await adminModels.updateDoctorStatusModel(doctor_id, is_active);
+
+        // If deactivating, invalidate their token (set to null)
+        if (is_active === 0 && doctor.zynq_user_id) {
+            await webModels.update_jwt_fcm_token(null, null, doctor.zynq_user_id, language);
+        }
+
+        const message = is_active === 1 
+            ? "Expert has been activated successfully." 
+            : "Expert has been deactivated successfully.";
+
+        return handleSuccess(res, 200, language, message, { doctor_id, is_active });
+    } catch (error) {
+        console.error("updateDoctorStatusController error:", error);
+        return handleError(res, 500, 'en', "INTERNAL_SERVER_ERROR " + error.message);
+    }
+};
+
+export const archiveExpertEmailController = async (req, res) => {
+    try {
+        const schema = Joi.object({
+            doctor_id: Joi.string().uuid().required()
+        });
+
+        const { error, value } = schema.validate(req.body);
+        if (error) return joiErrorHandle(res, error);
+
+        const { doctor_id } = value;
+        const language = req.user?.language || "en";
+
+        const [doctor] = await adminModels.getDoctorById(doctor_id);
+        if (!doctor) {
+            return handleError(res, 404, language, "DOCTOR_NOT_FOUND");
+        }
+
+        if (!doctor.zynq_user_id) {
+            return handleError(res, 400, language, "DOCTOR_HAS_NO_USER_ACCOUNT");
+        }
+
+        const [user] = await webModels.get_web_user_by_id(doctor.zynq_user_id);
+        if (!user) {
+            return handleError(res, 404, language, "USER_NOT_FOUND");
+        }
+
+        const originalEmail = user.email;
+        if (originalEmail.includes('+archived')) {
+            return handleError(res, 400, language, "Email is already archived.");
+        }
+
+        const emailParts = originalEmail.split('@');
+        const timestamp = Math.floor(Date.now() / 1000);
+        const archivedEmail = `${emailParts[0]}+archived${timestamp}@${emailParts[1]}`;
+
+        // Deactivate status and soft delete in doctor table, rename email in user table
+        await adminModels.updateDoctorStatusModel(doctor_id, 0);
+        await adminModels.softDeleteDoctorById(doctor_id, doctor.zynq_user_id);
+        await adminModels.archiveExpertEmailModel(doctor.zynq_user_id, archivedEmail);
+
+        // Clear JWT token and sessions
+        await webModels.update_jwt_fcm_token(null, null, doctor.zynq_user_id, language);
+
+        return handleSuccess(res, 200, language, "Expert email archived successfully. The original email can now be used for another account.", {
+            doctor_id,
+            original_email: originalEmail,
+            archived_email: archivedEmail
+        });
+    } catch (error) {
+        console.error("archiveExpertEmailController error:", error);
         return handleError(res, 500, 'en', "INTERNAL_SERVER_ERROR " + error.message);
     }
 };
