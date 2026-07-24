@@ -1355,7 +1355,6 @@ export const getAdminBookedAppointmentsModel = async ({ page, limit } = {}) => {
             LEFT JOIN tbl_zqnq_users zu2 ON zu2.id = d.zynq_user_id
             LEFT JOIN tbl_roles r ON zu2.role_id = r.id
             WHERE a.save_type = 'booked' 
-              AND a.total_price > 0 
               AND a.payment_status != 'unpaid'
             ORDER BY a.created_at DESC
         `;
