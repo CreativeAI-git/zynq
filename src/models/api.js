@@ -2687,6 +2687,7 @@ export const getTreatmentsByTreatmentDoctorId = async (doctor_id, lang) => {
                 grouped[row.treatment_id] = {
                     treatment_id: row.treatment_id,
                     name: row.treatment_name,
+                    swedish: row.swedish,
                     price: row.price,
                     classification_type: row.classification_type,
                     description_en: row.description_en,
@@ -2704,6 +2705,7 @@ export const getTreatmentsByTreatmentDoctorId = async (doctor_id, lang) => {
                 grouped[row.treatment_id].sub_treatments.push({
                     sub_treatment_id: row.sub_treatment_id,
                     name: row.sub_treatment_name,
+                    swedish: row.sub_treatment_name_sv,
                     price: row.sub_treatment_price
                 });
             }
