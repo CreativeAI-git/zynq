@@ -4900,10 +4900,12 @@ export const getTreatmentsByAppointmentId = async (appointment_id, language = 'e
     
     tat.treatment_id,
     ${nameCol} AS treatment_name,
+    tt.swedish AS treatment_swedish,
     tat.price AS treatment_price,
 
     tat.sub_treatment_id,
     ${subNameCol} AS sub_treatment_name,
+    st.swedish AS sub_treatment_swedish,
     tat.sub_treatment_price
 
 FROM tbl_appointment_treatments tat
@@ -4947,6 +4949,7 @@ ORDER BY tat.treatment_id
                 treatmentMap.set(r.treatment_id, {
                     treatment_id: r.treatment_id,
                     name: r.treatment_name,
+                    swedish: r.treatment_swedish,
                     price: Number(r.treatment_price) || 0,
                     sub_treatments: []
                 });
@@ -4956,6 +4959,7 @@ ORDER BY tat.treatment_id
                 treatmentMap.get(r.treatment_id).sub_treatments.push({
                     sub_treatment_id: r.sub_treatment_id,
                     name: r.sub_treatment_name,
+                    swedish: r.sub_treatment_swedish,
                     price: Number(r.sub_treatment_price) || 0
                 });
             }
