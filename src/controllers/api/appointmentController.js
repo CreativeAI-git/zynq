@@ -113,9 +113,6 @@ export const getMyAppointmentsUser = async (req, res) => {
             let chatId = await getChatBetweenUsers(userId, doctor[0]?.zynq_user_id);
             app.chatId = chatId.length > 0 ? chatId[0].id : null;
 
-            const localFormattedStart = app.start_time ? dayjs(app.start_time).format("YYYY-MM-DD HH:mm:ss") : null;
-            const localFormattedEnd = app.end_time ? dayjs(app.end_time).format("YYYY-MM-DD HH:mm:ss") : null;
-
             if (app.profile_image && !app.profile_image.startsWith('http')) {
                 app.profile_image = `${APP_URL}doctor/profile_images/${app.profile_image}`;
             }
@@ -124,8 +121,8 @@ export const getMyAppointmentsUser = async (req, res) => {
                 app.pdf = `${APP_URL}${app.pdf}`;
             }
 
-            const startUTC = localFormattedStart ? dayjs.utc(localFormattedStart) : null;
-            const endUTC = localFormattedEnd ? dayjs.utc(localFormattedEnd) : null;
+            const startUTC = app.start_time ? dayjs.utc(app.start_time) : null;
+            const endUTC = app.end_time ? dayjs.utc(app.end_time) : null;
 
             // Safe check for video call eligibility
             const videoCallOn = (
@@ -279,9 +276,6 @@ export const getAppointmentsById = async (req, res) => {
 
                 app.chatId = chatId.length > 0 ? chatId[0].id : null;
 
-                const localFormattedStart = app.start_time ? dayjs(app.start_time).format("YYYY-MM-DD HH:mm:ss") : null;
-                const localFormattedEnd = app.end_time ? dayjs(app.end_time).format("YYYY-MM-DD HH:mm:ss") : null;
-
                 if (app.profile_image && !app.profile_image.startsWith("http")) {
                     app.profile_image = `${APP_URL}doctor/profile_images/${app.profile_image}`;
                 }
@@ -290,8 +284,8 @@ export const getAppointmentsById = async (req, res) => {
                     app.pdf = `${APP_URL}${app.pdf}`;
                 }
 
-                const startUTC = localFormattedStart ? dayjs.utc(localFormattedStart) : null;
-                const endUTC = localFormattedEnd ? dayjs.utc(localFormattedEnd) : null;
+                const startUTC = app.start_time ? dayjs.utc(app.start_time) : null;
+                const endUTC = app.end_time ? dayjs.utc(app.end_time) : null;
 
                 const videoCallOn = now.isAfter(startUTC) && now.isBefore(endUTC);
 
@@ -299,8 +293,8 @@ export const getAppointmentsById = async (req, res) => {
 
                 return {
                     ...app,
-                    start_time: localFormattedStart ? dayjs.utc(localFormattedStart).toISOString() : null,
-                    end_time: localFormattedEnd ? dayjs.utc(localFormattedEnd).toISOString() : null,
+                    start_time: startUTC ? startUTC.toISOString() : null,
+                    end_time: endUTC ? endUTC.toISOString() : null,
                     videoCallOn,
                     treatments,
                     draftAppointments: draftTreatments
@@ -512,9 +506,6 @@ export const getMyTreatmentPlans = async (req, res) => {
             let chatId = await getChatBetweenUsers(userId, doctor[0].zynq_user_id);
             app.chatId = chatId.length > 0 ? chatId[0].id : null;
 
-            const localFormattedStart = app.start_time ? dayjs(app.start_time).format("YYYY-MM-DD HH:mm:ss") : null;
-            const localFormattedEnd = app.end_time ? dayjs(app.end_time).format("YYYY-MM-DD HH:mm:ss") : null;
-
             if (app.profile_image && !app.profile_image.startsWith('http')) {
                 app.profile_image = `${APP_URL}doctor/profile_images/${app.profile_image}`;
             }
@@ -524,8 +515,8 @@ export const getMyTreatmentPlans = async (req, res) => {
             }
 
 
-            const startUTC = localFormattedStart ? dayjs.utc(localFormattedStart) : null;
-            const endUTC = localFormattedEnd ? dayjs.utc(localFormattedEnd) : null;
+            const startUTC = app.start_time ? dayjs.utc(app.start_time) : null;
+            const endUTC = app.end_time ? dayjs.utc(app.end_time) : null;
             //const videoCallOn = now.isAfter(startUTC) && now.isBefore(endUTC);
             const videoCallOn =
                 app.status !== 'Completed'
@@ -536,8 +527,8 @@ export const getMyTreatmentPlans = async (req, res) => {
 
             return {
                 ...app,
-                start_time: localFormattedStart ? dayjs.utc(localFormattedStart).toISOString() : null,
-                end_time: localFormattedEnd ? dayjs.utc(localFormattedEnd).toISOString() : null,
+                start_time: startUTC ? startUTC.toISOString() : null,
+                end_time: endUTC ? endUTC.toISOString() : null,
                 videoCallOn,
                 treatments
             };

@@ -17,15 +17,12 @@ export const getMyAppointmentsClinic = asyncHandler(async (req, res) => {
     }
 
     const result = appointments.map((app) => {
-        const localFormattedStart = app.start_time ? dayjs(app.start_time).format("YYYY-MM-DD HH:mm:ss") : null;
-        const localFormattedEnd = app.end_time ? dayjs(app.end_time).format("YYYY-MM-DD HH:mm:ss") : null;
-
         if (app.profile_image && !app.profile_image.startsWith('http')) {
             app.profile_image = `${APP_URL}${app.profile_image}`;
         }
 
-        const startUTC = localFormattedStart ? dayjs.utc(localFormattedStart) : null;
-        const endUTC = localFormattedEnd ? dayjs.utc(localFormattedEnd) : null;
+        const startUTC = app.start_time ? dayjs.utc(app.start_time) : null;
+        const endUTC = app.end_time ? dayjs.utc(app.end_time) : null;
 
         const videoCallOn = (
             startUTC?.isValid() &&

@@ -36,14 +36,12 @@ export const getMyAppointmentsDoctor = async (req, res) => {
             let end_time_iso = null;
             let videoCallOn = false;
             if (app.start_time && app.end_time) {
-                const localFormattedStart = dayjs(app.start_time).format("YYYY-MM-DD HH:mm:ss");
-                const localFormattedEnd = dayjs(app.end_time).format("YYYY-MM-DD HH:mm:ss");
-                const startUTC = dayjs.utc(localFormattedStart);
-                const endUTC = dayjs.utc(localFormattedEnd);
+                const startUTC = dayjs.utc(app.start_time);
+                const endUTC = dayjs.utc(app.end_time);
                 start_time_iso = startUTC.toISOString();
                 end_time_iso = endUTC.toISOString();
                 // Check if current time is between start and end
-                videoCallOn = app.status !== 'Completed' && dayjs().isAfter(startUTC) && dayjs().isBefore(endUTC);
+                videoCallOn = app.status !== 'Completed' && dayjs.utc().isAfter(startUTC) && dayjs.utc().isBefore(endUTC);
             }
 
             return {
@@ -73,16 +71,14 @@ export const getMyAppointmentById = async (req, res) => {
         const now = dayjs.utc();
         const appointments = clinicId ? await appointmentModel.getAppointmentByAppointmentId(clinicId, appointment_id) : await appointmentModel.getAppointmentByIdForDoctorV2(doctorId, appointment_id);
         const result = await Promise?.all(appointments?.map(async app => {
-            const localFormattedStart = dayjs(app.start_time).format("YYYY-MM-DD HH:mm:ss");
-            const localFormattedEnd = dayjs(app.end_time).format("YYYY-MM-DD HH:mm:ss");
             if (app.profile_image && !app.profile_image.startsWith('http')) {
                 app.profile_image = `${APP_URL}${app.profile_image}`;
             }
             if (app.pdf && !app.pdf.startsWith('http')) {
                 app.pdf = `${APP_URL}${app.pdf}`;
             }
-            const startUTC = dayjs.utc(localFormattedStart);
-            const endUTC = dayjs.utc(localFormattedEnd);
+            const startUTC = app.start_time ? dayjs.utc(app.start_time) : null;
+            const endUTC = app.end_time ? dayjs.utc(app.end_time) : null;
             const videoCallOn = app.status !== 'Completed' && now.isAfter(startUTC) && now.isBefore(endUTC);
             const suggestedTreatments = await getTreatmentsByAppointmentId(app.suggested_appointment_id);
             const doctor = await doctorModel.getDocterByDocterId(app.doctor_id);
@@ -91,8 +87,8 @@ export const getMyAppointmentById = async (req, res) => {
 
             return {
                 ...app,
-                start_time: dayjs.utc(localFormattedStart).toISOString(),
-                end_time: dayjs.utc(localFormattedEnd).toISOString(),
+                start_time: startUTC ? startUTC.toISOString() : null,
+                end_time: endUTC ? endUTC.toISOString() : null,
                 chatId: chatId.length > 0 ? chatId : null,
                 videoCallOn,
                 treatments,

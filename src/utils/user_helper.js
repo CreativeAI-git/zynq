@@ -149,11 +149,8 @@ export const getAppointmentDetails = async (userId, appointmentId) => {
         app.pdf = `${APP_URL}${app.pdf}`;
     }
 
-    const localFormattedStart = app.start_time ? dayjs(app.start_time).format("YYYY-MM-DD HH:mm:ss") : null;
-    const localFormattedEnd = app.end_time ? dayjs(app.end_time).format("YYYY-MM-DD HH:mm:ss") : null;
-
-    const startUTC = localFormattedStart ? dayjs.utc(localFormattedStart) : null;
-    const endUTC = localFormattedEnd ? dayjs.utc(localFormattedEnd) : null;
+    const startUTC = app.start_time ? dayjs.utc(app.start_time) : null;
+    const endUTC = app.end_time ? dayjs.utc(app.end_time) : null;
     const now = dayjs.utc();
 
     const videoCallOn = now.isAfter(startUTC) && now.isBefore(endUTC);
@@ -162,8 +159,8 @@ export const getAppointmentDetails = async (userId, appointmentId) => {
 
     return {
         ...app,
-        start_time: localFormattedStart ? startUTC.toISOString() : null,
-        end_time: localFormattedEnd ? endUTC.toISOString() : null,
+        start_time: startUTC ? startUTC.toISOString() : null,
+        end_time: endUTC ? endUTC.toISOString() : null,
         videoCallOn,
         treatments
     };
