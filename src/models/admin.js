@@ -962,9 +962,9 @@ export const getDoctorClinicTreatments = async (doctorId, clinicId) => {
             SELECT 
                 dt.doctor_id,
                 dt.treatment_id,
-                dt.price,
+                COALESCE(mct.total_price, 0) AS price,
                 dt.sub_treatment_id,
-                dt.sub_treatment_price,
+                COALESCE(mcst.price, 0) AS sub_treatment_price,
                 
                 tt.name AS treatment_name_en,
                 tt.swedish AS treatment_name_sv,
@@ -980,6 +980,12 @@ export const getDoctorClinicTreatments = async (doctorId, clinicId) => {
             LEFT JOIN 
                 tbl_sub_treatment_master st
                 ON dt.sub_treatment_id = st.sub_treatment_id
+            LEFT JOIN
+                tbl_mapped_clinic_treatments mct
+                ON mct.clinic_id = dt.clinic_id AND mct.treatment_id = dt.treatment_id
+            LEFT JOIN
+                tbl_mapped_clinic_sub_treatments mcst
+                ON mcst.clinic_treatment_id = mct.clinic_treatment_id AND mcst.sub_treatment_id = dt.sub_treatment_id
 
             WHERE 
                 dt.doctor_id = ?
