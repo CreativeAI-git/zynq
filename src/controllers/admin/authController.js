@@ -597,9 +597,6 @@ export const getUserAppointmentOfUser = async (req, res) => {
         const now = dayjs.utc();
         const result = await Promise.all(appointments.map(async (app) => {
 
-            const localFormattedStart = app.start_time ? dayjs(app.start_time).format("YYYY-MM-DD HH:mm:ss") : null;
-            const localFormattedEnd = app.end_time ? dayjs(app.end_time).format("YYYY-MM-DD HH:mm:ss") : null;
-
             if (app.profile_image && !app.profile_image.startsWith('http')) {
                 app.profile_image = `${process.env.APP_URL}doctor/profile_images/${app.profile_image}`;
             }
@@ -608,8 +605,8 @@ export const getUserAppointmentOfUser = async (req, res) => {
                 app.pdf = `${process.env.APP_URL}${app.pdf}`;
             }
 
-            const startUTC = localFormattedStart ? dayjs.utc(localFormattedStart) : null;
-            const endUTC = localFormattedEnd ? dayjs.utc(localFormattedEnd) : null;
+            const startUTC = app.start_time ? dayjs.utc(app.start_time) : null;
+            const endUTC = app.end_time ? dayjs.utc(app.end_time) : null;
 
 
             const treatments = await appointmentModel.getAppointmentTreatments(app.appointment_id);
