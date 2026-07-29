@@ -364,6 +364,27 @@ export const get_doctor_consultation_fee = async (doctorId) => {
 
 export const updateDoctorSessionSlots = async (doctorId, availabilityData, clinic_id) => {
     try {
+        // Fetch the configured slot time for the doctor and clinic
+        const [mapping] = await db.query(
+            `SELECT doctor_slot_time FROM tbl_doctor_clinic_map WHERE doctor_id = ? AND clinic_id = ?`,
+            [doctorId, clinic_id]
+        );
+        let expectedSlotTime = mapping?.doctor_slot_time ? Number(mapping.doctor_slot_time) : null;
+        if (!expectedSlotTime) {
+            const [doctor] = await db.query(`SELECT slot_time FROM tbl_doctors WHERE doctor_id = ?`, [doctorId]);
+            expectedSlotTime = doctor?.slot_time ? Number(doctor.slot_time) : 15;
+        }
+
+        const getSessionDurationInMinutes = (startTime, endTime) => {
+            if (!startTime || !endTime) return 0;
+            const start = startTime.split(':').map(Number);
+            const end = endTime.split(':').map(Number);
+            if (start.some(isNaN) || end.some(isNaN)) return 0;
+            const startMins = start[0] * 60 + (start[1] || 0);
+            const endMins = end[0] * 60 + (end[1] || 0);
+            return endMins - startMins;
+        };
+
         // 1. Delete existing slots
         await db.query(
             `DELETE t1, t2 
@@ -377,19 +398,27 @@ export const updateDoctorSessionSlots = async (doctorId, availabilityData, clini
         // 2. Insert new slot days
         for (const avail of availabilityData) {
             const doctorSlotDayId = uuidv4();
+            const slotTimeVal = avail.slot_time ? Number(avail.slot_time) : expectedSlotTime;
             await db.query(
                 `INSERT INTO tbl_doctor_slot_day (doctor_slot_day_id, doctor_id, day, slot_time, clinic_id) VALUES (?, ?, ?, ?, ?)`,
-                [doctorSlotDayId, doctorId, avail.day, avail.slot_time, clinic_id]
+                [doctorSlotDayId, doctorId, avail.day, slotTimeVal, clinic_id]
             );
 
 
-            // 3. Insert sessions for each day
+            // 3. Insert sessions for each day, filtering by session duration matching slotTimeVal
             if (avail.session && avail.session.length > 0) {
-                const sessionValues = avail.session.map(s => [uuidv4(), doctorSlotDayId, s.start_time, s.end_time]);
-                await db.query(
-                    `INSERT INTO tbl_doctor_session_time (doctor_session_time_id, doctor_slot_day_id, start_time, end_time) VALUES ?`,
-                    [sessionValues]
-                );
+                const filteredSessions = avail.session.filter(s => {
+                    const duration = getSessionDurationInMinutes(s.start_time, s.end_time);
+                    return duration === slotTimeVal;
+                });
+
+                if (filteredSessions.length > 0) {
+                    const sessionValues = filteredSessions.map(s => [uuidv4(), doctorSlotDayId, s.start_time, s.end_time]);
+                    await db.query(
+                        `INSERT INTO tbl_doctor_session_time (doctor_session_time_id, doctor_slot_day_id, start_time, end_time) VALUES ?`,
+                        [sessionValues]
+                    );
+                }
             }
         }
 
