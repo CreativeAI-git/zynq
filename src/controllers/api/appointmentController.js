@@ -1861,8 +1861,7 @@ export const bookDirectAppointment = asyncHandler(async (req, res) => {
             start_time: normalizedStart,
             end_time: normalizedEnd,
             is_paid,
-            // payment_status: final_total > 0 ? "unpaid" : "paid",
-            payment_status: "paid",
+            payment_status: final_total > 0 ? "unpaid" : "paid",
             payment_timing: payment_timing ? payment_timing : "PAY_NOW",
         };
 
@@ -1897,7 +1896,7 @@ export const bookDirectAppointment = asyncHandler(async (req, res) => {
         let session = null;
         // ---------------- PAYMENT SECTION (UPDATED) ----------------
 
-        if (is_paid && appointmentType === "Clinic Visit" && final_total != 0 && isAllTreatmentsFree === false) {
+        if (!is_paid && appointmentType === "Clinic Visit" && final_total != 0 && isAllTreatmentsFree === false) {
             if (payment_timing === 'PAY_LATER') {
                 const stripe_customer_id = await getOrCreateStripeCustomerId(user_id);
                 session = await createPayLaterSetupSession({
@@ -1987,7 +1986,7 @@ export const bookDirectAppointment = asyncHandler(async (req, res) => {
 
         // ---------------- FREE APPOINTMENT FLOW ----------------
         let newAppointmentDetails = await getAppointmentDetails(user_id, appointment_id);
-        if (is_paid && appointmentType === "Video Call" && final_total != 0 && doctor.fee_per_session !== 0) {
+        if (!is_paid && appointmentType === "Video Call" && final_total != 0 && doctor.fee_per_session !== 0) {
             let session;
             if (payment_timing === 'PAY_LATER') {
                 const stripe_customer_id = await getOrCreateStripeCustomerId(user_id);
