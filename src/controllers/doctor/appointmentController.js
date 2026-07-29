@@ -41,7 +41,7 @@ export const getMyAppointmentsDoctor = async (req, res) => {
                 start_time_iso = startUTC.toISOString();
                 end_time_iso = endUTC.toISOString();
                 // Check if current time is between start and end
-                videoCallOn = app.status !== 'Completed' && dayjs.utc().isAfter(startUTC) && dayjs.utc().isBefore(endUTC);
+                videoCallOn = app.type === 'Video Call' && app.status !== 'Completed' && dayjs.utc().isAfter(startUTC) && dayjs.utc().isBefore(endUTC);
             }
 
             return {
@@ -79,7 +79,7 @@ export const getMyAppointmentById = async (req, res) => {
             }
             const startUTC = app.start_time ? dayjs.utc(app.start_time) : null;
             const endUTC = app.end_time ? dayjs.utc(app.end_time) : null;
-            const videoCallOn = app.status !== 'Completed' && now.isAfter(startUTC) && now.isBefore(endUTC);
+            const videoCallOn = app.type === 'Video Call' && app.status !== 'Completed' && now.isAfter(startUTC) && now.isBefore(endUTC);
             const suggestedTreatments = await getTreatmentsByAppointmentId(app.suggested_appointment_id);
             const doctor = await doctorModel.getDocterByDocterId(app.doctor_id);
             let chatId = await chatModel.getChatBetweenUsers(app.user_id, doctor[0].zynq_user_id);
