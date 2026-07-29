@@ -1378,14 +1378,14 @@ export const get_single_appointments = async (appointment_id) => {
                 u.full_name AS user_name,
                 u.mobile_number AS user_mobile,
                 u.email AS email,
-                u.age AS age,
+                u.age AS user_age,
                 u.gender AS gender,
                 u.profile_image AS user_profile_image,
  
                 d.doctor_id AS doctor_id,
                 d.name AS doctor_name,
-                d.age AS age,
-                d.address,
+                d.age AS doctor_age,
+                d.address AS doctor_address,
                 d.biography,
                 d.profile_image AS doctor_image,
                 d.experience_years,
@@ -1397,7 +1397,7 @@ export const get_single_appointments = async (appointment_id) => {
                 c.clinic_name,
                 c.email AS clinic_email,
                 c.mobile_number AS clinic_mobile,
-                c.address,
+                c.address AS clinic_address,
 
                 fcr.face_scan_result_id,
                 fcr.pdf
