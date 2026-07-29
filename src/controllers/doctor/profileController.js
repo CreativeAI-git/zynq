@@ -440,7 +440,8 @@ export const editPersonalInformation = async (req, res) => {
             filename = req.file.filename
         }
         // await generateDoctorsEmbeddingsV2(doctorData.doctor_id)
-        const result = await doctorModels.add_personal_details(zynqUserId, value.name, value.phone, value.age, value.address, value.city, value.zip_code, value.latitude, value.longitude, value.gender, filename, value.biography, value.last_name, value.slot_time, "ONBOARDING");
+        const profile_status = doctorData?.profile_status === "VERIFIED" ? "VERIFIED" : "ONBOARDING";
+        const result = await doctorModels.add_personal_details(zynqUserId, value.name, value.phone, value.age, value.address, value.city, value.zip_code, value.latitude, value.longitude, value.gender, filename, value.biography, value.last_name, value.slot_time, profile_status);
         // await generateDoctorsEmbeddingsV2(zynqUserId)
         if (result.affectedRows > 0) {
             return handleSuccess(res, 200, language, "DOCTOR_PERSONAL_DETAILS_UPDATED", result.affectedRows);
@@ -1133,12 +1134,13 @@ export const createDoctorAvailability = async (req, res) => {
     try {
         const doctor_id = req.user.doctorData.doctor_id;
         const zynqUserId = req.user.id;
-        const clinic_id = req.user.clinicData.clinic_id;
+        const language = req?.user?.language || 'en';
 
         const schema = Joi.object({
             slot_time: Joi.string().required(),
             same_for_all: Joi.number().valid(1, 0).optional().allow(null),
             fee_per_session: Joi.number().optional(),
+            clinic_id: Joi.string().uuid().optional(),
             availability: Joi.array().items(
                 Joi.object({
                     day_of_week: Joi.string().valid('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday').required(),
@@ -1152,23 +1154,45 @@ export const createDoctorAvailability = async (req, res) => {
         const { error, value } = schema.validate(req.body);
         if (error) return joiErrorHandle(res, error);
 
-        const { slot_time, same_for_all, fee_per_session, availability } = value;
+        const { slot_time, same_for_all, fee_per_session, availability, clinic_id: bodyClinicId } = value;
 
-        // const { days, fee_per_session, dr_type } = req.body;
-        const language = req?.user?.language || 'en';
+        let clinic_id = bodyClinicId;
+
+        if (!clinic_id && req.user.role === 'DOCTOR') {
+            const clinics = await doctorModels.get_clinics(doctor_id);
+            if (clinics.length > 0) {
+                clinic_id = clinics[0].clinic_id;
+            }
+        }
+
+        if (!clinic_id) {
+            clinic_id = req.user.clinicData?.clinic_id;
+        }
+
+        if (!clinic_id) {
+            return handleError(res, 400, language, "CLINIC_ID_REQUIRED");
+        }
 
         await dbOperations.updateData('tbl_doctors', { fee_per_session: fee_per_session, slot_time: slot_time }, `WHERE doctor_id = '${doctor_id}' `);
 
         if (availability?.length > 0) {
             const doctorSession = convertAvailability(availability, Number(slot_time));
             await doctorModels.updateDoctorSessionSlots(doctor_id, doctorSession, clinic_id);
-            const clinic_timing = mapAvailabilityToClinicTiming(availability);
-            await updateClinicOperationHours(clinic_timing, clinic_id);
+            
+            // Only update clinic operation hours if the user owns/manages the clinic (Solo Doctor or Clinic Admin)
+            if (req.user.role === 'SOLO_DOCTOR' || req.user.role === 'CLINIC') {
+                const clinic_timing = mapAvailabilityToClinicTiming(availability);
+                await updateClinicOperationHours(clinic_timing, clinic_id);
+            }
         }
 
         await update_onboarding_status(5, zynqUserId);
 
-        await dbOperations.updateData('tbl_clinics', { is_onboarded: 1, same_for_all: same_for_all, slot_time: slot_time }, `WHERE zynq_user_id = '${zynqUserId}' `);
+        // Only update clinic onboarding status if the user owns/manages the clinic
+        if (req.user.role === 'SOLO_DOCTOR' || req.user.role === 'CLINIC') {
+            await dbOperations.updateData('tbl_clinics', { is_onboarded: 1, same_for_all: same_for_all, slot_time: slot_time }, `WHERE zynq_user_id = '${zynqUserId}' `);
+        }
+
         return handleSuccess(res, 200, language, 'UPDATE_DOCTOR_AVAILABILITY_SUCCESSFULLY');
     } catch (err) {
         console.error('Error creating availability:', err);
