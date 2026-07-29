@@ -1833,9 +1833,10 @@ export const bookDirectAppointment = asyncHandler(async (req, res) => {
             let data = await fetchFees_per_session_doctor(doctor_id, clinic_id);
             doctor.fee_per_session = data.fee_per_session
         }
-        const hasTreatments = Array.isArray(treatments) && treatments.length > 0;
+        // const hasTreatments = Array.isArray(treatments) && treatments.length > 0;
         vat_amount = 0;
-        final_total = hasTreatments ? subtotal : (doctor.fee_per_session || 0);
+        // final_total = hasTreatments ? subtotal : (doctor.fee_per_session || 0);
+        final_total = subtotal === 0 ? doctor.fee_per_session : subtotal;
         let admin_earnings = +((final_total * ADMIN_EARNING_PERCENTAGE) / 100).toFixed(2);
         let clinic_earnings = +(final_total - admin_earnings).toFixed(2);
 
@@ -1860,7 +1861,8 @@ export const bookDirectAppointment = asyncHandler(async (req, res) => {
             start_time: normalizedStart,
             end_time: normalizedEnd,
             is_paid,
-            payment_status: final_total > 0 ? "unpaid" : "paid",
+            // payment_status: final_total > 0 ? "unpaid" : "paid",
+            payment_status: "paid",
             payment_timing: payment_timing ? payment_timing : "PAY_NOW",
         };
 
