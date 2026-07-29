@@ -25,6 +25,7 @@ export const getMyAppointmentsClinic = asyncHandler(async (req, res) => {
         const endUTC = app.end_time ? dayjs.utc(app.end_time) : null;
 
         const videoCallOn = (
+            app.type === 'Video Call' &&
             startUTC?.isValid() &&
             endUTC?.isValid() &&
             now.isAfter(startUTC) &&
