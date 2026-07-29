@@ -381,60 +381,52 @@ export const get_single_all_appointments = async (req, res) => {
             return handleSuccess(res, 200, 'en', "No appointments found", {});
         }
 
-        const now = dayjs.utc();
-        const formatted = appointments.map(row => {
-            const startUTC = row.start_time ? dayjs.utc(row.start_time) : null;
-            const endUTC = row.end_time ? dayjs.utc(row.end_time) : null;
-            const videoCallOn = row.status !== 'Completed' && startUTC && endUTC && now.isAfter(startUTC) && now.isBefore(endUTC);
+        const formatted = appointments.map(row => ({
+            appointment_id: row.appointment_id,
+            start_time: row.start_time,
+            end_time: row.end_time,
+            type: row.type,
+            status: row.status,
 
-            return {
-                appointment_id: row.appointment_id,
-                start_time: row.start_time,
-                end_time: row.end_time,
-                type: row.type,
-                status: row.status,
-                videoCallOn,
+            user: {
+                user_id: row.user_id,
+                full_name: row.user_name,
+                mobile_number: row.user_mobile,
+                email: row.email,
+                age: row.age,
+                gender: row.gender,
+                profile_image: row.user_profile_image ? `${process.env.APP_URL}${row.user_profile_image}` : null,
 
-                user: {
-                    user_id: row.user_id,
-                    full_name: row.user_name,
-                    mobile_number: row.user_mobile,
-                    email: row.email,
-                    age: row.user_age,
-                    gender: row.gender,
-                    profile_image: row.user_profile_image ? `${process.env.APP_URL}${row.user_profile_image}` : null,
+            },
 
-                },
+            doctor: {
+                doctor_id: row.doctor_id,
+                name: row.doctor_name,
+                age: row.age,
+                address: row.address,
+                biography: row.biography,
+                experience_years: row.experience_years,
+                rating: row.rating,
+                phone: row.phone,
+                fee_per_session: row.fee_per_session,
+                profile_image: row.doctor_image
+                    ? process.env.APP_URL + "doctor/profile_images/" + row.doctor_image
+                    : null,
+            },
 
-                doctor: {
-                    doctor_id: row.doctor_id,
-                    name: row.doctor_name,
-                    age: row.doctor_age,
-                    address: row.doctor_address,
-                    biography: row.biography,
-                    experience_years: row.experience_years,
-                    rating: row.rating,
-                    phone: row.phone,
-                    fee_per_session: row.fee_per_session,
-                    profile_image: row.doctor_image
-                        ? process.env.APP_URL + "doctor/profile_images/" + row.doctor_image
-                        : null,
-                },
+            clinic: {
+                clinic_id: row.clinic_id,
+                clinic_name: row.clinic_name,
+                email: row.clinic_email,
+                mobile_number: row.clinic_mobile,
+                address: row.address,
+            },
 
-                clinic: {
-                    clinic_id: row.clinic_id,
-                    clinic_name: row.clinic_name,
-                    email: row.clinic_email,
-                    mobile_number: row.clinic_mobile,
-                    address: row.clinic_address,
-                },
-
-                scanReport: {
-                    face_scan_result_id: row.face_scan_result_id,
-                    pdf: row.pdf ? process.env.APP_URL + row.pdf : null
-                }
-            };
-        });
+            scanReport: {
+                face_scan_result_id: row.face_scan_result_id,
+                pdf: row.pdf ? process.env.APP_URL + row.pdf : null
+            }
+        }));
         const data = formatted[0] || {};
         return handleSuccess(res, 200, 'en', "Appointments fetched successfully", data);
     } catch (error) {
