@@ -90,16 +90,13 @@ export const updateFAQModel = async (faq_id, data) => {
 
 export const getAllFAQCategoriesModel = async (lang = "en") => {
   try {
-    // Map language to the right column
-    const column = lang === "sv" ? "swedish" : "english";
-
     const query = `
       SELECT 
         faq_category_id,
-        ${column} AS name,
+        english AS name,
         swedish
       FROM tbl_faq_categories
-      ORDER BY ${column};
+      ORDER BY english;
     `;
 
     return await db.query(query);
