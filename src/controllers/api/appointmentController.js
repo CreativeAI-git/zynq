@@ -415,6 +415,9 @@ export const saveOrBookAppointment = async (req, res) => {
 
         if (inputId) {
             await appointmentModel.updateAppointment(appointmentData);
+            if (save_type === 'draft') {
+                await appointmentModel.clearAppointmentDiscount(appointment_id);
+            }
             if (hasTreatments) {
                 await appointmentModel.deleteAppointmentTreatments(appointment_id);
                 await appointmentModel.insertAppointmentTreatments(appointment_id, treatments);
