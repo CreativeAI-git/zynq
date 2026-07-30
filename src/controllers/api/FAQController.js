@@ -16,7 +16,11 @@ export const getAllFAQs = asyncHandler(async (req, res) => {
                 faq_id: faq.faq_id,
                 category: faq.category,
                 question: faq[`ques_${lang}`],
-                answer: faq[`ans_${lang}`]
+                answer: faq[`ans_${lang}`],
+                question_en: faq.ques_en,
+                question_sv: faq.ques_sv,
+                answer_en: faq.ans_en,
+                answer_sv: faq.ans_sv
             }
         })
     }

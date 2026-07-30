@@ -96,7 +96,8 @@ export const getAllFAQCategoriesModel = async (lang = "en") => {
     const query = `
       SELECT 
         faq_category_id,
-        ${column} AS name
+        ${column} AS name,
+        swedish
       FROM tbl_faq_categories
       ORDER BY ${column};
     `;
