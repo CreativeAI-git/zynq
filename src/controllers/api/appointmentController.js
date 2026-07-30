@@ -127,7 +127,7 @@ export const getMyAppointmentsUser = async (req, res) => {
             // Safe check for video call eligibility
             const videoCallOn = (
                 app.type === 'Video Call' &&
-                ['Scheduled', 'Rescheduled'].includes(app.status) &&
+                ['Scheduled', 'Rescheduled', 'Ongoing'].includes(app.status) &&
                 startUTC?.isValid() &&
                 endUTC?.isValid() &&
                 now.isAfter(startUTC) &&
@@ -288,7 +288,7 @@ export const getAppointmentsById = async (req, res) => {
                 const startUTC = app.start_time ? dayjs.utc(app.start_time) : null;
                 const endUTC = app.end_time ? dayjs.utc(app.end_time) : null;
 
-                const videoCallOn = app.type === 'Video Call' && ['Scheduled', 'Rescheduled'].includes(app.status) && now.isAfter(startUTC) && now.isBefore(endUTC);
+                const videoCallOn = app.type === 'Video Call' && ['Scheduled', 'Rescheduled', 'Ongoing'].includes(app.status) && now.isAfter(startUTC) && now.isBefore(endUTC);
 
                 const treatments = await appointmentModel.getAppointmentTreatments(appointment_id, language);
 
@@ -524,7 +524,7 @@ export const getMyTreatmentPlans = async (req, res) => {
             //const videoCallOn = now.isAfter(startUTC) && now.isBefore(endUTC);
             const videoCallOn =
                 app.type === 'Video Call' &&
-                ['Scheduled', 'Rescheduled'].includes(app.status) &&
+                ['Scheduled', 'Rescheduled', 'Ongoing'].includes(app.status) &&
                 now.isAfter(startUTC) &&
                 now.isBefore(endUTC);
 

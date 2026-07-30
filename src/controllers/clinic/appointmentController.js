@@ -26,7 +26,7 @@ export const getMyAppointmentsClinic = asyncHandler(async (req, res) => {
 
         const videoCallOn = (
             app.type === 'Video Call' &&
-            ['Scheduled', 'Rescheduled'].includes(app.status) &&
+            ['Scheduled', 'Rescheduled', 'Ongoing'].includes(app.status) &&
             startUTC?.isValid() &&
             endUTC?.isValid() &&
             now.isAfter(startUTC) &&
