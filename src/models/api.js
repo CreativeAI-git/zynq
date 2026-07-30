@@ -1015,7 +1015,7 @@ export const getAllClinicsForUser = async ({
         } else if (sort.by === 'rating') {
             query += ` ORDER BY avg_rating ${sort.order.toUpperCase()}`;
         } else if (sort.by === 'price') {
-            query += ` ORDER BY doctor_lower_price_range ${sort.order.toUpperCase()}`;
+            query += ` ORDER BY doctor_lower_price_range ${sort.order.toUpperCase()}, doctor_higher_price_range ${sort.order.toUpperCase()}`;
         } else {
             query += ` ORDER BY c.created_at DESC`;
         }
@@ -1182,7 +1182,7 @@ export const getNearbyClinicsForUser = async ({
         } else if (sort.by === 'rating') {
             query += ` ORDER BY avg_rating ${sort.order.toUpperCase()}`;
         } else if (sort.by === 'price') {
-            query += ` ORDER BY doctor_lower_price_range ${sort.order.toUpperCase()}`;
+            query += ` ORDER BY doctor_lower_price_range ${sort.order.toUpperCase()}, doctor_higher_price_range ${sort.order.toUpperCase()}`;
         } else {
             query += ` ORDER BY c.created_at DESC`;
         }
