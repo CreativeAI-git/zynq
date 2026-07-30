@@ -1202,7 +1202,7 @@ export const getDoctorBookedAppointmentsModel = async (role, user_id) => {
     LEFT JOIN tbl_zqnq_users zu ON d.zynq_user_id = zu.id
     LEFT JOIN tbl_face_scan_results r ON r.face_scan_result_id = a.report_id
     LEFT JOIN tbl_clinics c ON c.clinic_id = a.clinic_id
-    WHERE ${whereClause} AND a.save_type = 'booked' AND a.total_price > 0 AND a.payment_status = 'paid'
+    WHERE ${whereClause} AND a.save_type = 'booked' AND a.payment_status = 'paid'
     ORDER BY a.created_at DESC
     `
 
