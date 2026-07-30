@@ -25,6 +25,30 @@ const formatForEmailSubject = (value) => {
     .trim();
 };
 
+// Converts a UTC datetime string (e.g. "2026-07-30 10:45:00") to Sweden local time
+const formatToSwedenTime = (utcDateStr) => {
+  if (!utcDateStr) return utcDateStr;
+  try {
+    // Append 'Z' to treat the string as UTC
+    const date = new Date(String(utcDateStr).trim().replace(" ", "T") + "Z");
+    if (isNaN(date.getTime())) return utcDateStr;
+    return new Intl.DateTimeFormat("sv-SE", {
+      timeZone: "Europe/Stockholm",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(date).replace("T", " ");
+  } catch (e) {
+    return utcDateStr;
+  }
+};
+
+
+
 export const appointmentBookedTemplate = {
   subject: ({ user_name, appointment_date }) =>
     `New Appointment Booked by ${user_name} - Appointment Booked For ${formatForEmailSubject(appointment_date)}`,
@@ -64,7 +88,7 @@ export const appointmentBookedTemplate = {
             <p><strong>User Name:</strong> ${user_name}</p>
             <p><strong>Expert Name:</strong> ${doctor_name}</p>
             <p><strong>Clinic Name:</strong> ${clinic_name}</p>
-            <p><strong>Date & Time:</strong> ${appointment_date}</p>
+            <p><strong>Date & Time:</strong> ${formatToSwedenTime(appointment_date)} (Sweden Time)</p>
             <p><strong>Amount Paid:</strong> ${total_price}</p>
  
             <p>Please prepare for the scheduled session accordingly.<br/>
@@ -124,7 +148,7 @@ export const appointmentBookedTemplateSv = {
             <p><strong>Användarnamn:</strong> ${user_name}</p>
             <p><strong>Expertnamn:</strong> ${doctor_name}</p>
             <p><strong>Kliniknamn:</strong> ${clinic_name}</p>
-            <p><strong>Datum och tid:</strong> ${appointment_date}</p>
+            <p><strong>Datum och tid:</strong> ${formatToSwedenTime(appointment_date)} (Svensk tid)</p>
             <p><strong>Betalt belopp:</strong> ${total_price}</p>
  
             <p>Förbered dig för den schemalagda sessionen därefter.<br/>
