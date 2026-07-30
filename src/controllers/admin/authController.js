@@ -330,7 +330,7 @@ export const get_all_appointments = async (req, res) => {
                 full_name: row.user_name,
                 mobile_number: row.user_mobile,
                 email: row.email,
-                age: row.age,
+                age: row.user_age,
                 gender: row.gender,
                 profile_image: row.user_profile_image ? `${process.env.APP_URL}${row.user_profile_image}` : null,
 
@@ -339,8 +339,8 @@ export const get_all_appointments = async (req, res) => {
             doctor: {
                 doctor_id: row.doctor_id,
                 name: row.doctor_name,
-                age: row.age,
-                address: row.address,
+                age: row.doctor_age,
+                address: row.doctor_address,
                 biography: row.biography,
                 experience_years: row.experience_years,
                 rating: row.rating,
@@ -356,7 +356,7 @@ export const get_all_appointments = async (req, res) => {
                 clinic_name: row.clinic_name,
                 email: row.clinic_email,
                 mobile_number: row.clinic_mobile,
-                address: row.address,
+                address: row.clinic_address,
             },
 
             scanReport: {
@@ -395,7 +395,7 @@ export const get_single_all_appointments = async (req, res) => {
                 full_name: row.user_name,
                 mobile_number: row.user_mobile,
                 email: row.email,
-                age: row.age,
+                age: row.user_age,
                 gender: row.gender,
                 profile_image: row.user_profile_image ? `${process.env.APP_URL}${row.user_profile_image}` : null,
 
@@ -404,8 +404,8 @@ export const get_single_all_appointments = async (req, res) => {
             doctor: {
                 doctor_id: row.doctor_id,
                 name: row.doctor_name,
-                age: row.age,
-                address: row.address,
+                age: row.doctor_age,
+                address: row.doctor_address,
                 biography: row.biography,
                 experience_years: row.experience_years,
                 rating: row.rating,
@@ -421,7 +421,7 @@ export const get_single_all_appointments = async (req, res) => {
                 clinic_name: row.clinic_name,
                 email: row.clinic_email,
                 mobile_number: row.clinic_mobile,
-                address: row.address,
+                address: row.clinic_address,
             },
 
             scanReport: {
