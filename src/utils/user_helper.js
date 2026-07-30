@@ -153,7 +153,7 @@ export const getAppointmentDetails = async (userId, appointmentId) => {
     const endUTC = app.end_time ? dayjs.utc(app.end_time) : null;
     const now = dayjs.utc();
 
-    const videoCallOn = app.type === 'Video Call' && now.isAfter(startUTC) && now.isBefore(endUTC);
+    const videoCallOn = app.type === 'Video Call' && ['Scheduled', 'Rescheduled'].includes(app.status) && now.isAfter(startUTC) && now.isBefore(endUTC);
 
     const treatments = await appointmentModel.getAppointmentTreatments(appointmentId);
 
