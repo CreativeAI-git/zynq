@@ -1212,7 +1212,7 @@ export const updateMissedAppointmentStatusModel = async () => {
     let query = `
     UPDATE tbl_appointments SET
     status = "Missed"
-    WHERE status = "Scheduled" AND end_time < UTC_TIMESTAMP()`
+    WHERE status IN ("Scheduled", "Ongoing") AND end_time < UTC_TIMESTAMP()`
 
     return await db.query(query);
 }
