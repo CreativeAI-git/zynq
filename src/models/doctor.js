@@ -1335,28 +1335,36 @@ export const getDoctorByDoctorID = async (doctor_id, clinic_id) => {
 const getDoctorDashboard = async (doctorId) => {
     const query = `
     SELECT 
-      COUNT(DISTINCT a.user_id) AS total_patients,
-      COUNT(a.appointment_id) AS total_appointments,
-      ROUND(AVG(ar.rating), 2) AS average_rating,
-      ROUND(IFNULL(SUM(
-        CASE WHEN a.save_type = 'booked' AND a.total_price > 0 
-             THEN a.clinic_earnings ELSE 0 END
-      ), 0), 2) AS clinic_appointment_earnings,
-(
-  SELECT ROUND(IFNULL(zw.amount, 0), 2)
-  FROM zynq_users_wallets zw
-  WHERE zw.user_id = ? AND zw.user_type = 'DOCTOR'
-  LIMIT 1
-) AS wallet_earnings
-
-    FROM tbl_appointments a
-    LEFT JOIN tbl_appointment_ratings ar 
-           ON a.appointment_id = ar.appointment_id 
-           AND ar.approval_status = 'APPROVED'
-    WHERE a.doctor_id = ? and a.payment_status != 'unpaid'
+      (
+        SELECT COUNT(DISTINCT sa.user_id)
+        FROM tbl_appointments sa
+        WHERE sa.doctor_id = ? AND sa.payment_status = 'paid'
+      ) AS total_patients,
+      (
+        SELECT COUNT(sa.appointment_id)
+        FROM tbl_appointments sa
+        WHERE sa.doctor_id = ? AND sa.save_type = 'booked' AND sa.payment_status = 'paid'
+      ) AS total_appointments,
+      (
+        SELECT ROUND(AVG(ar.rating), 2)
+        FROM tbl_appointment_ratings ar
+        JOIN tbl_appointments sa ON ar.appointment_id = sa.appointment_id
+        WHERE sa.doctor_id = ? AND ar.approval_status = 'APPROVED'
+      ) AS average_rating,
+      (
+        SELECT ROUND(IFNULL(SUM(sa.clinic_earnings), 0), 2)
+        FROM tbl_appointments sa
+        WHERE sa.doctor_id = ? AND sa.save_type = 'booked' AND sa.total_price > 0 AND sa.payment_status = 'paid'
+      ) AS clinic_appointment_earnings,
+      (
+        SELECT ROUND(IFNULL(zw.amount, 0), 2)
+        FROM zynq_users_wallets zw
+        WHERE zw.user_id = ? AND zw.user_type = 'DOCTOR'
+        LIMIT 1
+      ) AS wallet_earnings
   `;
 
-    const [dashboard = {}] = await db.query(query, [doctorId, doctorId]);
+    const [dashboard = {}] = await db.query(query, [doctorId, doctorId, doctorId, doctorId, doctorId]);
 
     return {
         total_patients: Number(dashboard.total_patients || 0),
@@ -1373,44 +1381,47 @@ const getDoctorDashboard = async (doctorId) => {
 const getSoloDoctorDashboard = async (doctorId, clinicId) => {
     const query = `
     SELECT 
-      COUNT(DISTINCT a.user_id) AS total_patients,
-      COUNT(a.appointment_id) AS total_appointments,
-      ROUND(AVG(ar.rating), 2) AS average_rating,
-
-      -- Clinic product earnings (if solo doctor is mapped to a clinic)
+      (
+        SELECT COUNT(DISTINCT sa.user_id)
+        FROM tbl_appointments sa
+        WHERE sa.doctor_id = ? AND sa.payment_status = 'paid'
+      ) AS total_patients,
+      (
+        SELECT COUNT(sa.appointment_id)
+        FROM tbl_appointments sa
+        WHERE sa.doctor_id = ? AND sa.save_type = 'booked' AND sa.payment_status = 'paid'
+      ) AS total_appointments,
+      (
+        SELECT ROUND(AVG(ar.rating), 2)
+        FROM tbl_appointment_ratings ar
+        JOIN tbl_appointments sa ON ar.appointment_id = sa.appointment_id
+        WHERE sa.doctor_id = ? AND ar.approval_status = 'APPROVED'
+      ) AS average_rating,
       (
         SELECT ROUND(IFNULL(SUM(pp.clinic_earnings), 0), 2)
         FROM tbl_product_purchase pp
         JOIN tbl_carts cart ON pp.cart_id = cart.cart_id
         WHERE cart.clinic_id = ?
       ) AS clinic_product_earnings,
-
-      -- Clinic appointment earnings
       (
         SELECT ROUND(IFNULL(SUM(sa.clinic_earnings), 0), 2)
         FROM tbl_appointments sa
-        WHERE sa.clinic_id = ? 
-          AND sa.save_type = 'booked'
-          AND sa.total_price > 0
+        WHERE sa.clinic_id = ? AND sa.save_type = 'booked' AND sa.total_price > 0 AND sa.payment_status = 'paid'
       ) AS clinic_appointment_earnings,
-
-      -- Wallet earnings
-(
-  SELECT ROUND(IFNULL(zw.amount, 0), 2)
-  FROM zynq_users_wallets zw
-  WHERE zw.user_id = ? AND zw.user_type = 'SOLO_DOCTOR'
-  LIMIT 1
-) AS wallet_earnings
-
-    FROM tbl_appointments a
-    LEFT JOIN tbl_appointment_ratings ar ON a.appointment_id = ar.appointment_id AND ar.approval_status = 'APPROVED'
-    WHERE a.doctor_id = ? AND a.payment_status != 'unpaid'
+      (
+        SELECT ROUND(IFNULL(zw.amount, 0), 2)
+        FROM zynq_users_wallets zw
+        WHERE zw.user_id = ? AND zw.user_type = 'SOLO_DOCTOR'
+        LIMIT 1
+      ) AS wallet_earnings
   `;
 
     const [row = {}] = await db.query(query, [
-        clinicId,
-        clinicId,
         doctorId,
+        doctorId,
+        doctorId,
+        clinicId,
+        clinicId,
         doctorId
     ]);
 
@@ -1419,11 +1430,9 @@ const getSoloDoctorDashboard = async (doctorId, clinicId) => {
         total_appointments: Number(row.total_appointments || 0),
         average_rating: Number(row.average_rating || 0),
         total_doctors: 0, // always 0 for solo doctor
-
         clinic_product_earnings: Number(row.clinic_product_earnings || 0),
         clinic_appointment_earnings: Number(row.clinic_appointment_earnings || 0),
         wallet_earnings: Number(row.wallet_earnings || 0),
-
         role: "SOLO_DOCTOR",
     };
 };
@@ -1431,34 +1440,46 @@ const getSoloDoctorDashboard = async (doctorId, clinicId) => {
 const getClinicDashboard = async (clinicId) => {
     const query = `
     SELECT 
-      COUNT(DISTINCT a.user_id) AS total_patients,
-      COUNT(a.appointment_id) AS total_appointments,
-      ROUND(AVG(ar.rating), 2) AS average_rating,
-      COUNT(DISTINCT map.doctor_id) AS total_doctors,
-
-      ROUND(IFNULL(SUM(CASE 
-        WHEN a.save_type = 'booked' AND a.total_price > 0 THEN a.clinic_earnings 
-        ELSE 0 END), 0), 2) AS clinic_appointment_earnings,
-
-      ROUND(IFNULL(SUM(pp.clinic_earnings), 0), 2) AS clinic_product_earnings,
-
-      -- Inline wallet earnings
-(
-  SELECT ROUND(IFNULL(zw.amount, 0), 2)
-  FROM zynq_users_wallets zw
-  WHERE zw.user_id = c.clinic_id 
-    AND zw.user_type = 'CLINIC'
-  LIMIT 1
-) AS wallet_earnings
-
-
+      (
+        SELECT COUNT(DISTINCT sa.user_id)
+        FROM tbl_appointments sa
+        WHERE sa.clinic_id = c.clinic_id AND sa.payment_status = 'paid'
+      ) AS total_patients,
+      (
+        SELECT COUNT(sa.appointment_id)
+        FROM tbl_appointments sa
+        WHERE sa.clinic_id = c.clinic_id AND sa.save_type = 'booked' AND sa.payment_status = 'paid'
+      ) AS total_appointments,
+      (
+        SELECT ROUND(AVG(ar.rating), 2)
+        FROM tbl_appointment_ratings ar
+        JOIN tbl_appointments sa ON ar.appointment_id = sa.appointment_id
+        WHERE sa.clinic_id = c.clinic_id AND ar.approval_status = 'APPROVED'
+      ) AS average_rating,
+      (
+        SELECT COUNT(DISTINCT map.doctor_id)
+        FROM tbl_doctor_clinic_map map
+        WHERE map.clinic_id = c.clinic_id
+      ) AS total_doctors,
+      (
+        SELECT ROUND(IFNULL(SUM(sa.clinic_earnings), 0), 2)
+        FROM tbl_appointments sa
+        WHERE sa.clinic_id = c.clinic_id AND sa.save_type = 'booked' AND sa.total_price > 0 AND sa.payment_status = 'paid'
+      ) AS clinic_appointment_earnings,
+      (
+        SELECT ROUND(IFNULL(SUM(pp.clinic_earnings), 0), 2)
+        FROM tbl_product_purchase pp
+        JOIN tbl_carts cart ON pp.cart_id = cart.cart_id
+        WHERE cart.clinic_id = c.clinic_id
+      ) AS clinic_product_earnings,
+      (
+        SELECT ROUND(IFNULL(zw.amount, 0), 2)
+        FROM zynq_users_wallets zw
+        WHERE zw.user_id = c.clinic_id AND zw.user_type = 'CLINIC'
+        LIMIT 1
+      ) AS wallet_earnings
     FROM tbl_clinics c
-    LEFT JOIN tbl_appointments a ON a.clinic_id = c.clinic_id
-    LEFT JOIN tbl_appointment_ratings ar ON a.appointment_id = ar.appointment_id AND ar.approval_status = 'APPROVED'
-    LEFT JOIN tbl_doctor_clinic_map map ON map.clinic_id = c.clinic_id
-    LEFT JOIN tbl_carts cart ON cart.clinic_id = c.clinic_id
-    LEFT JOIN tbl_product_purchase pp ON pp.cart_id = cart.cart_id
-    WHERE c.clinic_id = ? AND a.payment_status != 'unpaid'
+    WHERE c.clinic_id = ?
   `;
 
     const [row = {}] = await db.query(query, [clinicId]);
