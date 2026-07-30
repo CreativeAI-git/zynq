@@ -18,6 +18,7 @@ import initializeCallSocket from "./src/utils/callSocket.js";
 import { Server } from "socket.io";
 import bodyParser from "body-parser";
 import { handleStripeWebhook } from "./src/controllers/api/appointmentController.js";
+import apiLogger from "./apiLogger.js";
 
 // --------------------- ENV + PATH CONFIG ---------------------
 dotenv.config();
@@ -94,6 +95,8 @@ app.use((req, res, next) => {
 
   return next();
 });
+
+app.use(apiLogger);
 
 // Handle malformed JSON payloads gracefully
 app.use((err, req, res, next) => {
