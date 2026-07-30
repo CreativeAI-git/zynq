@@ -1010,6 +1010,15 @@ export const updateAppointment = async (data) => {
     return await db.query(query, [doctor_id, clinic_id, total_price, admin_earnings, clinic_earnings, type, start_time, end_time, save_type, status, payment_timing, appointment_id]);
 };
 
+export const clearAppointmentDiscount = async (appointment_id) => {
+    const query = `
+    UPDATE tbl_appointments
+    SET discount_type = NULL, discount_value = 0.00
+    WHERE appointment_id = ?
+  `;
+    return await db.query(query, [appointment_id]);
+};
+
 export const updateAppointmentV3 = async (data) => {
     const {
         appointment_id, doctor_id, clinic_id, total_price, admin_earnings, clinic_earnings,
