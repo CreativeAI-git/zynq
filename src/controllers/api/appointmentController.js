@@ -1841,7 +1841,8 @@ export const bookDirectAppointment = asyncHandler(async (req, res) => {
         // const hasTreatments = Array.isArray(treatments) && treatments.length > 0;
         vat_amount = 0;
         // final_total = hasTreatments ? subtotal : (doctor.fee_per_session || 0);
-        final_total = subtotal === 0 ? doctor.fee_per_session : subtotal;
+        // final_total = subtotal === 0 ? doctor.fee_per_session : subtotal;
+        final_total = (appointmentType === "Clinic Visit") ? subtotal : (subtotal === 0 ? doctor.fee_per_session : subtotal);
         let admin_earnings = +((final_total * ADMIN_EARNING_PERCENTAGE) / 100).toFixed(2);
         let clinic_earnings = +(final_total - admin_earnings).toFixed(2);
 
