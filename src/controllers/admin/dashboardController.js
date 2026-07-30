@@ -209,7 +209,7 @@ export const getEarnings = asyncHandler(async (req, res) => {
         
         let admin_earnings = isCancelledOrRefunded ? 0.00 : Number(appt.admin_earnings) || 0;
         let clinic_earnings = isCancelledOrRefunded ? 0.00 : Number(appt.clinic_earnings) || 0;
-        const total_price = isCancelledOrRefunded ? 0.00 : Number(appt.total_price) || 0;
+        const total_price = Number(appt.total_price) || 0;
         let commission_percentage = Number(appt.commission_percentage) || 0;
 
         // Fallback for valid completed/missed paid appointments that have 0.00 stored earnings in DB
@@ -234,9 +234,10 @@ export const getEarnings = asyncHandler(async (req, res) => {
         total_earnings: total_appointment_earnings
     } = processedAppointments.reduce(
         (acc, appointment) => {
+            const isCancelledOrRefunded = appointment.status === 'Cancelled' || ['unpaid', 'failed', 'refund_completed', 'refund_initiated'].includes(appointment.payment_status);
             acc.total_doctor_earnings += appointment.clinic_earnings;
             acc.total_admin_earnings += appointment.admin_earnings;
-            acc.total_earnings += appointment.total_price;
+            acc.total_earnings += isCancelledOrRefunded ? 0.00 : appointment.total_price;
             return acc;
         },
         {
