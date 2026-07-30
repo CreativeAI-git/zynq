@@ -323,6 +323,7 @@ export const get_all_appointments = async (req, res) => {
             end_time: row.end_time,
             type: row.type,
             status: row.status,
+            payment_status: row.payment_status,
 
             user: {
                 user_id: row.user_id,
@@ -387,6 +388,7 @@ export const get_single_all_appointments = async (req, res) => {
             end_time: row.end_time,
             type: row.type,
             status: row.status,
+            payment_status: row.payment_status,
 
             user: {
                 user_id: row.user_id,

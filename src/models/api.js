@@ -1318,6 +1318,7 @@ export const get_all_appointments = async () => {
                 a.end_time,
                 a.type,
                 a.status,
+                a.payment_status,
  
                 u.user_id AS user_id,
                 u.full_name AS user_name,
@@ -1373,6 +1374,7 @@ export const get_single_appointments = async (appointment_id) => {
                 a.end_time,
                 a.type,
                 a.status,
+                a.payment_status,
  
                 u.user_id AS user_id,
                 u.full_name AS user_name,
