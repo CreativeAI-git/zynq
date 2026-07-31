@@ -1013,7 +1013,10 @@ export const updateAppointment = async (data) => {
 export const clearAppointmentDiscount = async (appointment_id) => {
     const query = `
     UPDATE tbl_appointments
-    SET discount_type = NULL, discount_value = 0.00
+    SET discount_type = NULL, 
+        discount_value = 0.00,
+        total_price_with_discount = NULL,
+        discounted_amount = 0.00
     WHERE appointment_id = ?
   `;
     return await db.query(query, [appointment_id]);
