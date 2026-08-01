@@ -337,23 +337,41 @@ export const delete_clinic_management = async (req, res) => {
 
         const { clinic_id } = value;
 
-        const dependencies = await adminModels.checkClinicDependencies(clinic_id);
-        if (dependencies.doctors > 0 || dependencies.appointments > 0) {
-            return handleError(res, 400, 'en', `Cannot delete clinic. It has ${dependencies.doctors} active doctor mappings and ${dependencies.appointments} active/upcoming appointments.`);
+        // 1. Check if clinic exists
+        const [clinicRow] = await db.query(
+            `SELECT clinic_id, clinic_name FROM tbl_clinics WHERE clinic_id = ? AND is_deleted = 0`,
+            [clinic_id]
+        );
+        if (!clinicRow) {
+            return handleError(res, 404, 'en', "Clinic not found.");
         }
 
-        const result = await adminModels.delete_clinic_by_id(clinic_id);
-
-        if (result && result.affectedRows === 0) {
-            return handleSuccess(res, 404, 'en', "Clinic not found or already deleted", {});
+        // 2. Check if this clinic has any appointment history (any status)
+        const [appointmentCheck] = await db.query(
+            `SELECT COUNT(*) AS count FROM tbl_appointments WHERE clinic_id = ?`,
+            [clinic_id]
+        );
+        if (appointmentCheck?.count > 0) {
+            return handleError(res, 400, 'en',
+                `Cannot delete clinic "${clinicRow.clinic_name}". It has ${appointmentCheck.count} appointment(s) in history. You can deactivate it instead.`
+            );
         }
 
-        return handleSuccess(res, 200, 'en', "Clinic deleted successfully", result);
+        // 3. No appointments — safe to hard delete.
+        //    hardDeleteClinicAndAllRelatedData deletes doctor mappings (tbl_doctor_clinic_map)
+        //    AND all child tables AND the clinic itself in one transaction.
+        //    Expert accounts are NEVER deleted — they may be linked to other clinics.
+        await clinicModels.hardDeleteClinicAndAllRelatedData(clinic_id);
+
+        return handleSuccess(res, 200, 'en',
+            `Clinic "${clinicRow.clinic_name}" has been permanently deleted. All linked expert mappings have been removed.`
+        );
     } catch (error) {
         console.error("Delete Clinic Error:", error);
         return handleError(res, 500, 'en', "INTERNAL_SERVER_ERROR " + error.message);
     }
 };
+
 
 export const send_invitation = async (req, res) => {
     try {
