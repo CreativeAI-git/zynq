@@ -2343,7 +2343,7 @@ export const sendDoctorInvitationListController = async (req, res) => {
     }
 };
 
-// ✅ DELETE EXPERT — with active appointment check
+// ✅ DELETE EXPERT — with active history and transactional hard-delete check
 export const deleteExpertController = async (req, res) => {
     try {
         const language = 'en';
@@ -2353,7 +2353,7 @@ export const deleteExpertController = async (req, res) => {
             return handleError(res, 400, language, "Expert ID is required.");
         }
 
-        // 1. Check if expert exists (any state)
+        // 1. Check if expert exists
         const doctorRows = await adminModels.getDoctorById(doctor_id);
         if (!doctorRows || doctorRows.length === 0) {
             return handleError(res, 404, language, "Expert not found.");
@@ -2361,28 +2361,72 @@ export const deleteExpertController = async (req, res) => {
 
         const doctor = doctorRows[0];
         const expertName = `${doctor.name || ''} ${doctor.last_name || ''}`.trim() || 'This expert';
+        const zynq_user_id = doctor.zynq_user_id;
 
-        // 2. Already deleted?
-        if (doctor.is_deleted === 1) {
-            return handleError(res, 409, language, `Expert "${expertName}" is already deleted.`);
-        }
+        // 2. Check for active/completed/cancelled history in transactional tables
+        const [appointmentCheck] = await db.query(
+            `SELECT COUNT(*) AS count FROM tbl_appointments WHERE doctor_id = ?`,
+            [doctor_id]
+        );
+        const [chatCheck] = await db.query(
+            `SELECT COUNT(*) AS count FROM tbl_chats WHERE userId_1 = ? OR userId_2 = ?`,
+            [zynq_user_id, zynq_user_id]
+        );
+        const [reviewCheck] = await db.query(
+            `SELECT COUNT(*) AS count FROM tbl_doctor_reviews WHERE doctor_id = ?`,
+            [doctor_id]
+        );
+        const [ticketCheck] = await db.query(
+            `SELECT COUNT(*) AS count FROM tbl_support_tickets WHERE doctor_id = ?`,
+            [doctor_id]
+        );
 
-        // 3. Check for active appointments
-        const activeAppointments = await adminModels.checkDoctorActiveAppointments(doctor_id);
-        if (activeAppointments && activeAppointments.length > 0) {
-            const appt = activeAppointments[0];
-            const isOngoing = appt.status !== 'Upcoming' && appt.status !== 'Rescheduled';
-            const statusLabel = isOngoing ? 'Ongoing' : appt.status;
+        const hasHistory = (appointmentCheck?.count > 0) || 
+                           (chatCheck?.count > 0) || 
+                           (reviewCheck?.count > 0) || 
+                           (ticketCheck?.count > 0);
 
-            return handleError(res, 409, language,
-                `Expert "${expertName}" cannot be deleted because they have an ${statusLabel} appointment (ID: ${appt.appointment_id}). Please complete or cancel all active appointments before deleting this expert.`
+        if (hasHistory) {
+            return handleError(res, 400, language,
+                `Expert "${expertName}" cannot be permanently deleted because they have active history (appointments, chats, reviews, or tickets). You can deactivate their account or use "Archive Email" to free up their email address.`
             );
         }
 
-        // 4. Soft delete the expert and their auth account
-        await adminModels.softDeleteDoctorById(doctor_id, doctor.zynq_user_id);
+        // 3. Perform Safe Hard Delete inside a SQL Transaction
+        await db.query("START TRANSACTION");
+        try {
+            await db.query(`DELETE FROM tbl_doctor_aesthetic_devices WHERE doctor_id = ?`, [doctor_id]);
+            await db.query(`DELETE FROM tbl_doctor_certification WHERE doctor_id = ?`, [doctor_id]);
+            await db.query(`DELETE FROM tbl_doctor_clinic_map WHERE doctor_id = ?`, [doctor_id]);
+            await db.query(`DELETE FROM tbl_doctor_educations WHERE doctor_id = ?`, [doctor_id]);
+            await db.query(`DELETE FROM tbl_doctor_experiences WHERE doctor_id = ?`, [doctor_id]);
+            await db.query(`DELETE FROM tbl_doctor_severity_levels WHERE doctor_id = ?`, [doctor_id]);
+            await db.query(`DELETE FROM tbl_doctor_skin_condition WHERE doctor_id = ?`, [doctor_id]);
+            await db.query(`DELETE FROM tbl_doctor_skin_types WHERE doctor_id = ?`, [doctor_id]);
+            await db.query(`DELETE FROM tbl_doctor_slot_day WHERE doctor_id = ?`, [doctor_id]);
+            await db.query(`DELETE FROM tbl_doctor_surgery WHERE doctor_id = ?`, [doctor_id]);
+            await db.query(`DELETE FROM tbl_doctor_treatments WHERE doctor_id = ?`, [doctor_id]);
 
-        return handleSuccess(res, 200, language, "Expert deleted successfully.", {
+            if (zynq_user_id) {
+                await db.query(`DELETE FROM tbl_sub_treatment_user_maps WHERE zynq_user_id = ?`, [zynq_user_id]);
+                await db.query(`DELETE FROM tbl_treatment_device_user_maps WHERE zynq_user_id = ?`, [zynq_user_id]);
+                await db.query(`DELETE FROM tbl_treatment_sub_treatment_user_maps WHERE zynq_user_id = ?`, [zynq_user_id]);
+                await db.query(`DELETE FROM tbl_notifications WHERE sender_id = ? OR receiver_id = ?`, [zynq_user_id, zynq_user_id]);
+            }
+
+            await db.query(`DELETE FROM tbl_doctors WHERE doctor_id = ?`, [doctor_id]);
+
+            if (zynq_user_id) {
+                await db.query(`DELETE FROM tbl_zqnq_users WHERE id = ?`, [zynq_user_id]);
+            }
+
+            await db.query("COMMIT");
+        } catch (txError) {
+            await db.query("ROLLBACK");
+            throw txError;
+        }
+
+        return handleSuccess(res, 200, language, "Expert permanently deleted successfully.", {
             doctor_id,
             expert_name: expertName,
         });
@@ -2481,4 +2525,4 @@ export const archiveExpertEmailController = async (req, res) => {
         console.error("archiveExpertEmailController error:", error);
         return handleError(res, 500, 'en', "INTERNAL_SERVER_ERROR " + error.message);
     }
-};
+};
