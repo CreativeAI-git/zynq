@@ -1907,10 +1907,11 @@ export const updateDoctorSlotTimeAndCunsultationFeeOfClinicModel = async ({
 }) => {
     try {
 
-        const [mappedDoctorClinic] = await db.query(
+        const [rows] = await db.query(
             `SELECT * FROM tbl_doctor_clinic_map WHERE clinic_id = ? AND doctor_id = ?`,
             [clinic_id, doctor_id]
         );
+        const mappedDoctorClinic = rows[0] || {};
 
         return await db.query(
             `UPDATE tbl_doctor_clinic_map 

@@ -1477,6 +1477,9 @@ export const updateDoctorController = async (req, res) => {
                     item
                 );
 
+                let sendInvitation = false;
+                let invitation_id = "";
+
                 if (!existingMap) {
                     const clinicMapData = {
                         doctor_id: doctorId,
@@ -1485,14 +1488,17 @@ export const updateDoctorController = async (req, res) => {
                     };
                     await clinicModels.create_doctor_clinic_map(clinicMapData);
                     const [doctorClinicMap] = await clinicModels.get_doctor_clinic_map_by_both(doctorId, item);
-                    const invitation_id = doctorClinicMap?.map_id;
+                    invitation_id = doctorClinicMap?.map_id;
+                    sendInvitation = true;
+                } else if (existingMap.is_unsync === 1) {
+                    await clinicModels.resyncClinicModel(doctorId, item);
+                    invitation_id = existingMap.map_id;
+                    sendInvitation = true;
+                }
 
+                if (sendInvitation) {
                     const [clinicData] = await clinicModels.getClinicProfile(item);
-
                     const [get_location] = await clinicModels.get_clinic_location_by_clinic_id(item);
-
-
-                    const emailTemplatePath = path.resolve(__dirname, "../../views/doctor_invite/en.ejs");
 
                     const emailTemplatePath2 = path.resolve(__dirname, "../../views/doctor_invite/enn.ejs");
 

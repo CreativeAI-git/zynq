@@ -185,9 +185,16 @@ export const getPaymentHistory = asyncHandler(async (req, res) => {
         getAdminBookedAppointmentsModel()
     ])
 
+    // Filter out free (price <= 0) and cancelled or refunded appointments
+    const filteredAppointments = appointments.filter(appt => {
+        const isCancelledOrRefunded = appt.status === 'Cancelled' || ['unpaid', 'failed', 'refund_completed', 'refund_initiated'].includes(appt.payment_status);
+        const hasPrice = Number(appt.total_price) > 0;
+        return !isCancelledOrRefunded && hasPrice;
+    });
+
     const data = {
         products: purchases,
-        appointments: appointments
+        appointments: filteredAppointments
     }
 
     return handleSuccess(res, 200, language, "PURCHASED_PRODUCTS_FETCHED", data);

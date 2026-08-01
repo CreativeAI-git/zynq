@@ -3069,6 +3069,21 @@ export const unsynkClinicModel = async (doctor_id, clinic_id) => {
     }
 };
 
+export const resyncClinicModel = async (doctor_id, clinic_id) => {
+    try {
+        const sql = `
+            UPDATE tbl_doctor_clinic_map
+            SET is_unsync = 0, is_invitation_accepted = 0
+            WHERE doctor_id = ? AND clinic_id = ?
+        `;
+        const result = await db.query(sql, [doctor_id, clinic_id]);
+        return result;
+    } catch (error) {
+        console.error("Database Error:", error.message);
+        throw new Error("Failed to resync clinic.");
+    }
+};
+
 export const getDoctorClinicMappedDataModel = async (doctor_id, clinic_id) => {
     try {
         return await db.query(`
