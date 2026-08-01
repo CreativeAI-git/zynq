@@ -70,7 +70,12 @@ export const update_jwt_fcm_token = async (token, fcm_token, id,language) => {
         query += ` WHERE id = ?`;
         params.push(id);
 
-        return await db.query(query, params);
+        const result = await db.query(query, params);
+
+        // Sync language to tbl_clinics if they have clinic profile
+        await db.query(`UPDATE tbl_clinics SET language = ? WHERE zynq_user_id = ?`, [language, id]);
+
+        return result;
     } catch (error) {
         console.error("Database Error:", error.message);
         throw new Error("Failed to update JWT and/or FCM token.");
