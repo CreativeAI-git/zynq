@@ -1,4 +1,5 @@
 import { CompositionHookListInstance } from "twilio/lib/rest/video/v1/compositionHook.js";
+import db from "../../config/db.js";
 import * as adminModels from "../../models/admin.js";
 import { handleError, handleSuccess, joiErrorHandle } from "../../utils/responseHandler.js";
 import { calculateProfileCompletionPercentageByDoctorId } from "../doctor/profileController.js";
