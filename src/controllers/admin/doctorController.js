@@ -1585,6 +1585,7 @@ export const updateSoloDoctorController = async (req, res) => {
 
         const schema = Joi.object({
             zynq_user_id: Joi.string().uuid().required(),
+            email: Joi.string().email().optional().allow('', null),
             slot_time: Joi.string().required(),
             same_for_all: Joi.string().valid("1", "0").optional().allow(null),
             name: Joi.string().max(255).optional().allow('', null),
@@ -1721,6 +1722,7 @@ export const updateSoloDoctorController = async (req, res) => {
         if (error) return joiErrorHandle(res, error);
 
         const {
+            email,
             name,
             last_name,
             age,
@@ -1757,6 +1759,14 @@ export const updateSoloDoctorController = async (req, res) => {
         } = value;
 
         const language = req.user.language || "en";
+
+        if (email) {
+            const emailExists = await adminModels.checkZynqEmailExists(email, zynq_user_id);
+            if (emailExists) {
+                return handleError(res, 400, language, "This email address is already associated with another account.");
+            }
+            await adminModels.updateZynqUserEmail(zynq_user_id, email);
+        }
 
         const [clinic] = await clinicModels.get_clinic_by_zynq_user_id(
             zynq_user_id
@@ -2471,4 +2481,4 @@ export const archiveExpertEmailController = async (req, res) => {
         console.error("archiveExpertEmailController error:", error);
         return handleError(res, 500, 'en', "INTERNAL_SERVER_ERROR " + error.message);
     }
-};
+};
