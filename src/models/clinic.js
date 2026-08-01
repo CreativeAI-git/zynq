@@ -960,7 +960,37 @@ export const deleteClinicData = async (clinic_id) => {
     }
 };
 
+export const hardDeleteClinicAndAllRelatedData = async (clinic_id) => {
+    const conn = await db.getConnection();
+    try {
+        await conn.beginTransaction();
+
+        // Delete all child table records first (in safe order), then the clinic itself
+        await conn.query('DELETE FROM tbl_doctor_clinic_map WHERE clinic_id = ?', [clinic_id]);
+        await conn.query('DELETE FROM tbl_clinic_locations WHERE clinic_id = ?', [clinic_id]);
+        await conn.query('DELETE FROM tbl_clinic_images WHERE clinic_id = ?', [clinic_id]);
+        await conn.query('DELETE FROM tbl_clinic_documents WHERE clinic_id = ?', [clinic_id]);
+        await conn.query('DELETE FROM tbl_clinic_operation_hours WHERE clinic_id = ?', [clinic_id]);
+        await conn.query('DELETE FROM tbl_clinic_surgery WHERE clinic_id = ?', [clinic_id]);
+        await conn.query('DELETE FROM tbl_clinic_skin_condition WHERE clinic_id = ?', [clinic_id]);
+        await conn.query('DELETE FROM tbl_clinic_aesthetic_devices WHERE clinic_id = ?', [clinic_id]);
+        await conn.query('DELETE FROM tbl_clinic_equipments WHERE clinic_id = ?', [clinic_id]);
+        await conn.query('DELETE FROM tbl_clinic_skin_types WHERE clinic_id = ?', [clinic_id]);
+        await conn.query('DELETE FROM tbl_clinic_severity_levels WHERE clinic_id = ?', [clinic_id]);
+        await conn.query('DELETE FROM tbl_clinics WHERE clinic_id = ?', [clinic_id]);
+
+        await conn.commit();
+    } catch (error) {
+        await conn.rollback();
+        console.error("Database Error in hardDeleteClinicAndAllRelatedData:", error.message);
+        throw new Error("Failed to hard delete clinic and related data.");
+    } finally {
+        conn.release();
+    }
+};
+
 export const getCertificateTypeByFileName = async (file_name) => {
+
     try {
         const documents = await db.query('SELECT * FROM tbl_certification_type WHERE file_name = ? ORDER BY created_at DESC', [file_name]);
         return documents;
@@ -3069,7 +3099,23 @@ export const unsynkClinicModel = async (doctor_id, clinic_id) => {
     }
 };
 
+export const unsynkAllDoctorsByClinicModel = async (clinic_id) => {
+    try {
+        const sql = `
+            UPDATE tbl_doctor_clinic_map
+            SET is_unsync = 1
+            WHERE clinic_id = ? AND is_unsync = 0
+        `;
+        const result = await db.query(sql, [clinic_id]);
+        return result;
+    } catch (error) {
+        console.error("Database Error:", error.message);
+        throw new Error("Failed to unsync all doctors for clinic.");
+    }
+};
+
 export const resyncClinicModel = async (doctor_id, clinic_id) => {
+
     try {
         const sql = `
             UPDATE tbl_doctor_clinic_map
