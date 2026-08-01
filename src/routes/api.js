@@ -285,4 +285,13 @@ router.post("/get-sub-treatments-by-search", authenticateUser, validate(getAllDo
 
 router.post("/aws-image-recognition", uploadImageToMemory, analyzeImageController);
 
+router.get("/v1/health/baseline", (req, res) => {
+  res.json({
+    component: "zynq-backend",
+    version: "Live Production Environment",
+    commit_sha: "f40b7e3fcf67dc843056f227737cab39b5931784",
+    db_migration: "commercial_line_items_v1"
+  });
+});
+
 export default router;
