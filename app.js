@@ -120,6 +120,15 @@ app.get("/", (req, res) => {
   res.send("Zynq App Working 🚀");
 });
 
+app.get("/health/baseline", (req, res) => {
+  res.json({
+    component: "zynq-backend",
+    version: "Live Production Environment",
+    commit_sha: "f40b7e3fcf67dc843056f227737cab39b5931784",
+    db_migration: "commercial_line_items_v1"
+  });
+});
+
 // --------------------- START SERVER FUNCTION ---------------------
 function startServer() {
   let server;

@@ -1469,6 +1469,15 @@ export const updateDoctorController = async (req, res) => {
 
         let [user] = await webModels.get_web_user_by_id(zynq_user_id);
 
+        // Unsync clinics that are not in the new clinic_id list
+        const existingClinics = (await doctorModels.get_clinics_data_by_doctor_id(doctorId)) || [];
+        const newClinicIds = clinic_id || [];
+        for (const existing of existingClinics) {
+            if (!newClinicIds.includes(existing.clinic_id)) {
+                await clinicModels.unsynkClinicModel(doctorId, existing.clinic_id);
+            }
+        }
+
         await Promise.all(
             clinic_id.map(async (item, index) => {
 
