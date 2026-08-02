@@ -348,6 +348,10 @@ export const getDoctorProfile = async (req, res) => {
         const zynqUserId = req.user.id;
 
         const profileData = await doctorModels.get_doctor_profile(doctorId, language, zynqUserId);
+        if (profileData) {
+            delete profileData.password;
+            delete profileData.show_password;
+        }
 
         let completionPercentage = 0;
         let filledFieldsCount = 0;

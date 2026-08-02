@@ -65,6 +65,10 @@ export const login_web_user = async (req, res) => {
 
         await webModels.update_jwt_fcm_token(token, fcm_token, existingWebUser.id, language);
         const [user_data] = await webModels.get_web_user_by_id(existingWebUser.id);
+        if (user_data) {
+            delete user_data.password;
+            delete user_data.show_password;
+        }
         const [get_clinic] = await clinicModels.get_clinic_by_zynq_user_id(existingWebUser.id);
         const [get_doctor] = await get_doctor_by_zynq_user_id(existingWebUser.id);
 
