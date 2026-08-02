@@ -567,7 +567,7 @@ export const getClinicSurgeriesLevels = async (clinic_id) => {
 export const getClinicAestheticDevicesLevel = async (clinic_id) => {
     try {
         const devices = await db.query(
-            `SELECT DISTINCT ad.id, ad.treatment_id, ad.device_name, d.swedish, ad.created_at 
+            `SELECT DISTINCT ad.id, ad.treatment_id, ad.device_name, ad.device_name AS name, d.swedish, ad.created_at 
              FROM tbl_clinic_aesthetic_devices cad  
              INNER JOIN tbl_treatment_devices ad
                  ON ad.id = cad.aesthetic_devices_id 
@@ -1721,10 +1721,19 @@ export const getAllsurgery = async (language) => {
 export const getAllDevices = async (ids) => {
     try {
         if (!ids || !ids.length) {
-            return await db.query('SELECT * FROM tbl_treatment_devices');
+            return await db.query(`
+                SELECT ad.*, d.swedish, ad.device_name AS name 
+                FROM tbl_treatment_devices ad 
+                LEFT JOIN tbl_devices d ON d.device_id = ad.device_id
+            `);
         }
 
-        const sql = `SELECT * FROM tbl_treatment_devices WHERE treatment_id IN (?)`;
+        const sql = `
+            SELECT ad.*, d.swedish, ad.device_name AS name 
+            FROM tbl_treatment_devices ad 
+            LEFT JOIN tbl_devices d ON d.device_id = ad.device_id 
+            WHERE ad.treatment_id IN (?)
+        `;
 
         // MySQL expects an array inside array → [[]]
         const devices = await db.query(sql, [ids]);
@@ -3035,10 +3044,12 @@ export const getAllSurgeriesOfClinic = async (language, clinic_id) => {
 export const getAllDevicesOfClinic = async (clinic_id, ids = []) => {
     try {
         let sql = `
-            SELECT DISTINCT d.id ,d.treatment_id,d.device_name,d.created_at
+            SELECT DISTINCT d.id, d.treatment_id, d.device_name, d.device_name AS name, dev.swedish, d.created_at
             FROM tbl_clinic_aesthetic_devices cad
             INNER JOIN tbl_treatment_devices d
                 ON cad.aesthetic_devices_id = d.id
+            LEFT JOIN tbl_devices dev
+                ON dev.device_id = d.device_id
             WHERE cad.clinic_id = ?
         `;
         let params = [clinic_id];

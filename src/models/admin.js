@@ -1201,13 +1201,17 @@ export const getDoctorClinicDevices = async (zynqUserId, clinicId) => {
     try {
         return await db.query(`
             SELECT 
-                tdum.*, td.device_name
+                tdum.*, td.device_name, td.device_name AS name, d.swedish
             FROM 
                 tbl_treatment_device_user_maps tdum
             JOIN 
                 tbl_treatment_devices td 
             ON 
                 tdum.device_id = td.id
+            LEFT JOIN
+                tbl_devices d
+            ON
+                d.device_id = td.device_id
             WHERE 
                 tdum.zynq_user_id = ? AND tdum.clinic_id = ?`, [zynqUserId, clinicId]);
     } catch (error) {
