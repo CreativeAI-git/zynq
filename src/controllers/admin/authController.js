@@ -308,6 +308,13 @@ export const get_all_call_logs = async (req, res) => {
     }
 };
 
+const calculateAge = (dobString) => {
+    if (!dobString) return null;
+    const date = dayjs(dobString.replace(/\//g, '-'));
+    if (!date.isValid()) return dobString;
+    return dayjs().diff(date, 'year');
+};
+
 export const get_all_appointments = async (req, res) => {
     try {
         await updateMissedAppointmentStatusModel();
@@ -330,7 +337,7 @@ export const get_all_appointments = async (req, res) => {
                 full_name: row.user_name,
                 mobile_number: row.user_mobile,
                 email: row.email,
-                age: row.user_age,
+                age: calculateAge(row.user_age),
                 gender: row.gender,
                 profile_image: row.user_profile_image ? `${process.env.APP_URL}${row.user_profile_image}` : null,
 
@@ -339,7 +346,7 @@ export const get_all_appointments = async (req, res) => {
             doctor: {
                 doctor_id: row.doctor_id,
                 name: row.doctor_name,
-                age: row.doctor_age,
+                age: calculateAge(row.doctor_age),
                 address: row.doctor_address,
                 biography: row.biography,
                 experience_years: row.experience_years,
@@ -395,7 +402,7 @@ export const get_single_all_appointments = async (req, res) => {
                 full_name: row.user_name,
                 mobile_number: row.user_mobile,
                 email: row.email,
-                age: row.user_age,
+                age: calculateAge(row.user_age),
                 gender: row.gender,
                 profile_image: row.user_profile_image ? `${process.env.APP_URL}${row.user_profile_image}` : null,
 
@@ -404,7 +411,7 @@ export const get_single_all_appointments = async (req, res) => {
             doctor: {
                 doctor_id: row.doctor_id,
                 name: row.doctor_name,
-                age: row.doctor_age,
+                age: calculateAge(row.doctor_age),
                 address: row.doctor_address,
                 biography: row.biography,
                 experience_years: row.experience_years,
