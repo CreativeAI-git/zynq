@@ -38,9 +38,9 @@ export const get_web_user_by_email = async (email) => {
     }
 };
 
-export const update_reset_token = async (reset_token, reset_token_expiry, email,language) => {
+export const update_reset_token = async (reset_token, reset_token_expiry, email, language) => {
     try {
-        return await db.query(`UPDATE tbl_zqnq_users SET reset_token = ?, reset_token_expiry = ?,language = ? WHERE email = ?`, [reset_token, reset_token_expiry, language,email]);
+        return await db.query(`UPDATE tbl_zqnq_users SET reset_token = ?, reset_token_expiry = ?,language = ? WHERE email = ?`, [reset_token, reset_token_expiry, language, email]);
     } catch (error) {
         console.error("Database Error:", error.message);
 
@@ -56,10 +56,10 @@ export const get_web_user_by_reset_token = async (reset_token) => {
     }
 }
 
-export const update_jwt_fcm_token = async (token, fcm_token, id,language) => {
+export const update_jwt_fcm_token = async (token, fcm_token, id, language) => {
     try {
         let query = `UPDATE tbl_zqnq_users SET jwt_token = ?, language = ? `;
-        const params = [token,language];
+        const params = [token, language];
 
         // Only update fcm_token if provided (not null or undefined)
         if (fcm_token != null) {
@@ -100,9 +100,9 @@ export const update_onboarding_status = async (status, id) => {
     }
 };
 
-export const update_web_user_password_set = async (password, show_password, id,language) => {
+export const update_web_user_password_set = async (password, show_password, id, language) => {
     try {
-        return await db.query(`UPDATE tbl_zqnq_users SET password = ?, show_password = ?, is_password_set = 1,language = ? WHERE id = ?`, [password, show_password,language, id]);
+        return await db.query(`UPDATE tbl_zqnq_users SET password = ?, show_password = ?, is_password_set = 1,language = ? WHERE id = ?`, [password, show_password, language, id]);
     } catch (error) {
         console.error("Database Error:", error.message);
         throw new Error("Failed to update web user password.");
@@ -220,6 +220,7 @@ export const toggleUserLanguage = async (userData) => {
 
             const roleTableMap = {
                 CLINIC: 'tbl_clinics',
+                SOLO_DOCTOR: 'tbl_clinics',
                 DOCTOR: 'tbl_doctors',
                 SOLO_DOCTOR: 'tbl_doctors'
             };
