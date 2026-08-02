@@ -431,6 +431,10 @@ export const getDoctorProfile = async (req, res) => {
         const doctorId = req.user.doctorData.doctor_id;
 
         const profileData = await doctorModels.get_doctor_profile(doctorId, language);
+        if (profileData) {
+            delete profileData.password;
+            delete profileData.show_password;
+        }
 
         let completionPercentage = 0;
         let filledFieldsCount = 0;
