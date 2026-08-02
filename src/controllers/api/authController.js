@@ -28,9 +28,9 @@ import * as doctorModels from "../../models/doctor.js";
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import isSameOrBefore from 'dayjs/plugin/isSameOrBefore.js';
-import pkg from 'rrule';
+import { RRule } from 'rrule';
 import { getContactUsData, insertContactUs } from "../../models/appointment.js";
-const { RRule } = pkg;
+// const { RRule } = pkg;
 dayjs.extend(utc);
 dayjs.extend(isSameOrBefore);
 
