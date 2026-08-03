@@ -655,7 +655,7 @@ export const getDoctorProfileByStatus = async (req, res) => {
         // Personal Details
         if (status == 1) {
             [profileData] = await dbOperations.getData('tbl_doctors', `WHERE zynq_user_id = '${zynqUserId}' `);
-            var [clinic] = await dbOperations.getSelectedColumn('clinic_logo, clinic_name , clinic_id ,mobile_number,address,clinic_description,org_number,address', 'tbl_clinics', `WHERE zynq_user_id = '${zynqUserId}' `);
+            var [clinic] = await dbOperations.getSelectedColumn('clinic_logo, clinic_name , clinic_id ,mobile_number,address,clinic_description,org_number,language', 'tbl_clinics', `WHERE zynq_user_id = '${zynqUserId}' `);
             if (!clinic) {
                 return handleError(res, 404, "en", "CLINIC_NOT_FOUND");
             }
@@ -689,12 +689,13 @@ export const getDoctorProfileByStatus = async (req, res) => {
             profileData.on_boarding_status = zynqUser[0].on_boarding_status;
 
         } else if (status == 2) {
-            const clinicData = await dbOperations.getSelectedColumn('address, website_url, mobile_number', 'tbl_clinics', `WHERE zynq_user_id = '${zynqUserId}' `);
+            const clinicData = await dbOperations.getSelectedColumn('address, website_url, mobile_number, language', 'tbl_clinics', `WHERE zynq_user_id = '${zynqUserId}' `);
             const [clinicLocation] = await clinicModels.getClinicLocation(clinicId);
             clinic = clinicLocation;
             clinic['address'] = clinicData[0].address;
             clinic['website_url'] = clinicData[0].website_url;
             clinic['mobile_number'] = clinicData[0].mobile_number;
+            clinic['language'] = clinicData[0].language;
 
             const zynqUser = await fetchZynqUserByUserId(zynqUserId);
             clinic.on_boarding_status = zynqUser[0].on_boarding_status;
@@ -771,7 +772,7 @@ export const getDoctorProfileByStatus = async (req, res) => {
         completionPercentage = totalFieldsCount > 0 ? Math.round((filledFieldsCount / totalFieldsCount) * 100) : 0;
         // Get profile for clinic starts 
 
-        return handleSuccess(res, 200, language, "DOCTOR_PROFILE_RETRIEVED", { ...profileData, clinic, completionPercentage, email });
+        return handleSuccess(res, 200, language, "DOCTOR_PROFILE_RETRIEVED", { ...profileData, clinic, completionPercentage, email, language: req.user.language || 'en' });
     } catch (error) {
         console.error(error);
         return handleError(res, 500, 'en', "INTERNAL_SERVER_ERROR");
